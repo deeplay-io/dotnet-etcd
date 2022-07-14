@@ -3,6 +3,7 @@
 
 using System;
 using System.IO;
+using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -76,38 +77,10 @@ namespace dotnet_etcd
         /// </summary>
         /// <param name="leaseId"></param>
         /// <param name="cancellationToken"></param>
-        public async Task LeaseKeepAlive(long leaseId, CancellationToken cancellationToken) => await CallEtcdAsync(async (connection) =>
-                                                                                             {
-                                                                                                 using (AsyncDuplexStreamingCall<LeaseKeepAliveRequest, LeaseKeepAliveResponse> leaser =
-                                                                                                     connection._leaseClient.LeaseKeepAlive(cancellationToken: cancellationToken))
-                                                                                                 {
-                                                                                                     LeaseKeepAliveRequest request = new LeaseKeepAliveRequest
-                                                                                                     {
-                                                                                                         ID = leaseId
-                                                                                                     };
-
-                                                                                                     while (true)
-                                                                                                     {
-                                                                                                         cancellationToken.ThrowIfCancellationRequested();
-
-                                                                                                         await leaser.RequestStream.WriteAsync(request).ConfigureAwait(false);
-                                                                                                         if (!await leaser.ResponseStream.MoveNext(cancellationToken).ConfigureAwait(false))
-                                                                                                         {
-                                                                                                             await leaser.RequestStream.CompleteAsync().ConfigureAwait(false);
-                                                                                                             throw new EndOfStreamException();
-                                                                                                         }
-
-                                                                                                         LeaseKeepAliveResponse update = leaser.ResponseStream.Current;
-                                                                                                         if (update.ID != leaseId || update.TTL == 0) // expired
-                                                                                                         {
-                                                                                                             await leaser.RequestStream.CompleteAsync().ConfigureAwait(false);
-                                                                                                             return;
-                                                                                                         }
-
-                                                                                                         await Task.Delay(TimeSpan.FromMilliseconds(update.TTL * 1000 / 3), cancellationToken).ConfigureAwait(false);
-                                                                                                     }
-                                                                                                 }
-                                                                                             }).ConfigureAwait(false);
+        public async Task LeaseKeepAlive(long leaseId, CancellationToken cancellationToken) => await LeaseKeepAlive(
+            request: new LeaseKeepAliveRequest { ID = leaseId },
+            method: response => { },
+            cancellationToken);
 
         /// <summary>
         /// LeaseKeepAlive keeps the lease alive by streaming keep alive requests from the client
@@ -118,26 +91,11 @@ namespace dotnet_etcd
         /// <param name="cancellationToken"></param>
         /// <param name="headers">The initial metadata to send with the call. This parameter is optional.</param>
         public async Task LeaseKeepAlive(LeaseKeepAliveRequest request, Action<LeaseKeepAliveResponse> method,
-            CancellationToken cancellationToken, Grpc.Core.Metadata headers = null) => await CallEtcdAsync(async (connection) =>
-                                                                                     {
-                                                                                         using (AsyncDuplexStreamingCall<LeaseKeepAliveRequest, LeaseKeepAliveResponse> leaser =
-                                                                                             connection._leaseClient
-                                                                                                 .LeaseKeepAlive(headers, cancellationToken: cancellationToken))
-                                                                                         {
-                                                                                             Task leaserTask = Task.Run(async () =>
-                                                                                             {
-                                                                                                 while (await leaser.ResponseStream.MoveNext(cancellationToken).ConfigureAwait(false))
-                                                                                                 {
-                                                                                                     LeaseKeepAliveResponse update = leaser.ResponseStream.Current;
-                                                                                                     method(update);
-                                                                                                 }
-                                                                                             }, cancellationToken);
-
-                                                                                             await leaser.RequestStream.WriteAsync(request).ConfigureAwait(false);
-                                                                                             await leaser.RequestStream.CompleteAsync().ConfigureAwait(false);
-                                                                                             await leaserTask.ConfigureAwait(false);
-                                                                                         }
-                                                                                     }).ConfigureAwait(false);
+            CancellationToken cancellationToken, Grpc.Core.Metadata headers = null) => await LeaseKeepAlive(
+            new[] { request },
+            new[] { method },
+            cancellationToken,
+            headers);
 
         /// <summary>
         /// LeaseKeepAlive keeps the lease alive by streaming keep alive requests from the client
@@ -148,31 +106,11 @@ namespace dotnet_etcd
         /// <param name="cancellationToken"></param>
         /// <param name="headers">The initial metadata to send with the call. This parameter is optional.</param>
         public async Task LeaseKeepAlive(LeaseKeepAliveRequest request, Action<LeaseKeepAliveResponse>[] methods,
-            CancellationToken cancellationToken, Grpc.Core.Metadata headers = null) => await CallEtcdAsync(async (connection) =>
-                                                                                     {
-                                                                                         using (AsyncDuplexStreamingCall<LeaseKeepAliveRequest, LeaseKeepAliveResponse> leaser =
-                                                                                             connection._leaseClient
-                                                                                                 .LeaseKeepAlive(headers, cancellationToken: cancellationToken))
-                                                                                         {
-                                                                                             Task leaserTask = Task.Run(async () =>
-                                                                                             {
-                                                                                                 while (await leaser.ResponseStream.MoveNext(cancellationToken).ConfigureAwait(false))
-                                                                                                 {
-                                                                                                     LeaseKeepAliveResponse update = leaser.ResponseStream.Current;
-                                                                                                     foreach (Action<LeaseKeepAliveResponse> method in methods)
-                                                                                                     {
-                                                                                                         method(update);
-                                                                                                     }
-
-                                                                                                 }
-                                                                                             }, cancellationToken);
-
-                                                                                             await leaser.RequestStream.WriteAsync(request).ConfigureAwait(false);
-                                                                                             await leaser.RequestStream.CompleteAsync().ConfigureAwait(false);
-                                                                                             await leaserTask.ConfigureAwait(false);
-                                                                                         }
-                                                                                     }).ConfigureAwait(false);
-
+            CancellationToken cancellationToken, Grpc.Core.Metadata headers = null) => await LeaseKeepAlive(
+            new[] { request },
+            methods,
+            cancellationToken,
+            headers);
 
         /// <summary>
         /// LeaseKeepAlive keeps the lease alive by streaming keep alive requests from the client
@@ -183,30 +121,11 @@ namespace dotnet_etcd
         /// <param name="cancellationToken"></param>
         /// <param name="headers">The initial metadata to send with the call. This parameter is optional.</param>
         public async Task LeaseKeepAlive(LeaseKeepAliveRequest[] requests, Action<LeaseKeepAliveResponse> method,
-            CancellationToken cancellationToken, Grpc.Core.Metadata headers = null) => await CallEtcdAsync(async (connection) =>
-                                                                                     {
-                                                                                         using (AsyncDuplexStreamingCall<LeaseKeepAliveRequest, LeaseKeepAliveResponse> leaser =
-                                                                                             connection._leaseClient
-                                                                                                 .LeaseKeepAlive(headers, cancellationToken: cancellationToken))
-                                                                                         {
-                                                                                             Task leaserTask = Task.Run(async () =>
-                                                                                             {
-                                                                                                 while (await leaser.ResponseStream.MoveNext(cancellationToken).ConfigureAwait(false))
-                                                                                                 {
-                                                                                                     LeaseKeepAliveResponse update = leaser.ResponseStream.Current;
-                                                                                                     method(update);
-                                                                                                 }
-                                                                                             }, cancellationToken);
-
-                                                                                             foreach (LeaseKeepAliveRequest request in requests)
-                                                                                             {
-                                                                                                 await leaser.RequestStream.WriteAsync(request).ConfigureAwait(false);
-                                                                                             }
-
-                                                                                             await leaser.RequestStream.CompleteAsync().ConfigureAwait(false);
-                                                                                             await leaserTask.ConfigureAwait(false);
-                                                                                         }
-                                                                                     }).ConfigureAwait(false);
+            CancellationToken cancellationToken, Grpc.Core.Metadata headers = null) => await LeaseKeepAlive(
+            requests,
+            new[] { method },
+            cancellationToken,
+            headers);
 
         /// <summary>
         /// LeaseKeepAlive keeps the lease alive by streaming keep alive requests from the client
@@ -218,34 +137,40 @@ namespace dotnet_etcd
         /// <param name="headers">The initial metadata to send with the call. This parameter is optional.</param>
         /// <param name="deadline">An optional deadline for the call. The call will be cancelled if deadline is hit.</param>
         public async Task LeaseKeepAlive(LeaseKeepAliveRequest[] requests, Action<LeaseKeepAliveResponse>[] methods,
-            CancellationToken cancellationToken, Grpc.Core.Metadata headers = null, DateTime? deadline = null) => await CallEtcdAsync(async (connection) =>
-                                                                                                                {
-                                                                                                                    using (AsyncDuplexStreamingCall<LeaseKeepAliveRequest, LeaseKeepAliveResponse> leaser =
-                                                                                                                        connection._leaseClient
-                                                                                                                            .LeaseKeepAlive(headers, deadline, cancellationToken))
-                                                                                                                    {
-                                                                                                                        Task leaserTask = Task.Run(async () =>
-                                                                                                                        {
-                                                                                                                            while (await leaser.ResponseStream.MoveNext(cancellationToken).ConfigureAwait(false))
-                                                                                                                            {
-                                                                                                                                LeaseKeepAliveResponse update = leaser.ResponseStream.Current;
-                                                                                                                                foreach (Action<LeaseKeepAliveResponse> method in methods)
-                                                                                                                                {
-                                                                                                                                    method(update);
-                                                                                                                                }
+            CancellationToken cancellationToken, Grpc.Core.Metadata headers = null, DateTime? deadline = null) =>
+            await CallEtcdAsync(
+                async (connection) =>
+                {
+                    using (AsyncDuplexStreamingCall<LeaseKeepAliveRequest, LeaseKeepAliveResponse> leaser =
+                           connection._leaseClient
+                               .LeaseKeepAlive(
+                                   headers,
+                                   deadline,
+                                   cancellationToken))
+                    {
+                        Task leaserTask = Task.Run(
+                            async () =>
+                            {
+                                while (await leaser.ResponseStream.MoveNext(cancellationToken).ConfigureAwait(false))
+                                {
+                                    LeaseKeepAliveResponse update = leaser.ResponseStream.Current;
+                                    foreach (Action<LeaseKeepAliveResponse> method in methods)
+                                    {
+                                        method(update);
+                                    }
+                                }
+                            },
+                            cancellationToken);
 
-                                                                                                                            }
-                                                                                                                        }, cancellationToken);
+                        foreach (LeaseKeepAliveRequest request in requests)
+                        {
+                            await leaser.RequestStream.WriteAsync(request).ConfigureAwait(false);
+                        }
 
-                                                                                                                        foreach (LeaseKeepAliveRequest request in requests)
-                                                                                                                        {
-                                                                                                                            await leaser.RequestStream.WriteAsync(request).ConfigureAwait(false);
-                                                                                                                        }
-
-                                                                                                                        await leaser.RequestStream.CompleteAsync().ConfigureAwait(false);
-                                                                                                                        await leaserTask.ConfigureAwait(false);
-                                                                                                                    }
-                                                                                                                }).ConfigureAwait(false);
+                        await leaser.RequestStream.CompleteAsync().ConfigureAwait(false);
+                        await leaserTask.ConfigureAwait(false);
+                    }
+                }).ConfigureAwait(false);
 
         /// <summary>
         /// LeaseTimeToLive retrieves lease information.

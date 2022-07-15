@@ -2,9 +2,10 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
-using System.IO;
-using System.Net.Http.Headers;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 
 using Etcdserverpb;
@@ -74,13 +75,27 @@ namespace dotnet_etcd
         /// <summary>
         /// LeaseKeepAlive keeps the lease alive by streaming keep alive requests from the client
         /// to the server and streaming keep alive responses from the server to the client.
+        /// Task will be complited if lease expired or revoked
         /// </summary>
         /// <param name="leaseId"></param>
         /// <param name="cancellationToken"></param>
-        public async Task LeaseKeepAlive(long leaseId, CancellationToken cancellationToken) => await LeaseKeepAlive(
-            request: new LeaseKeepAliveRequest { ID = leaseId },
-            method: response => { },
-            cancellationToken);
+        public async Task LeaseKeepAlive(long leaseId, CancellationToken cancellationToken)
+        {
+            var leaseExpiredToken = new TaskCompletionSource<int>();
+            var keepAliveTask = LeaseKeepAlive(
+                request: new LeaseKeepAliveRequest { ID = leaseId },
+                method: response =>
+                {
+                    if (response.ID != leaseId || response.TTL == 0) // expired or not found
+                    {
+                        leaseExpiredToken.SetResult(0);
+                    }
+                },
+                cancellationToken);
+            await Task.WhenAny(
+                leaseExpiredToken.Task,
+                keepAliveTask).Unwrap();
+        }
 
         /// <summary>
         /// LeaseKeepAlive keeps the lease alive by streaming keep alive requests from the client
@@ -137,10 +152,14 @@ namespace dotnet_etcd
         /// <param name="headers">The initial metadata to send with the call. This parameter is optional.</param>
         /// <param name="deadline">An optional deadline for the call. The call will be cancelled if deadline is hit.</param>
         public async Task LeaseKeepAlive(LeaseKeepAliveRequest[] requests, Action<LeaseKeepAliveResponse>[] methods,
-            CancellationToken cancellationToken, Grpc.Core.Metadata headers = null, DateTime? deadline = null) =>
-            await CallEtcdAsync(
-                async (connection) =>
+            CancellationToken cancellationToken, Grpc.Core.Metadata headers = null, DateTime? deadline = null)
+        {
+            int retryCount = 0;
+            while (true)
+            {
+                try
                 {
+                    var connection = _balancer.GetConnection();
                     using (AsyncDuplexStreamingCall<LeaseKeepAliveRequest, LeaseKeepAliveResponse> leaser =
                            connection._leaseClient
                                .LeaseKeepAlive(
@@ -148,29 +167,77 @@ namespace dotnet_etcd
                                    deadline,
                                    cancellationToken))
                     {
+                        Channel<LeaseKeepAliveResponse> leasesCh = Channel.CreateUnbounded<LeaseKeepAliveResponse>();
                         Task leaserTask = Task.Run(
                             async () =>
                             {
                                 while (await leaser.ResponseStream.MoveNext(cancellationToken).ConfigureAwait(false))
                                 {
+                                    retryCount = 0;
                                     LeaseKeepAliveResponse update = leaser.ResponseStream.Current;
                                     foreach (Action<LeaseKeepAliveResponse> method in methods)
                                     {
                                         method(update);
                                     }
+
+                                    await leasesCh.Writer.WriteAsync(
+                                        update,
+                                        cancellationToken);
                                 }
                             },
                             cancellationToken);
 
                         foreach (LeaseKeepAliveRequest request in requests)
                         {
-                            await leaser.RequestStream.WriteAsync(request).ConfigureAwait(false);
+                            await leaser.RequestStream
+                                .WriteAsync(request)
+                                .ConfigureAwait(false);
+                        }
+
+                        List<Task<LeaseKeepAliveResponse>> leases = new List<Task<LeaseKeepAliveResponse>>();
+                        while (cancellationToken.IsCancellationRequested == false &&
+                               (leaserTask.IsCompleted == false || leases.Count > 0))
+                        {
+                            await Task.WhenAny(
+                                leases.Select(t => t as Task)
+                                    .Append(leasesCh.Reader.WaitToReadAsync(cancellationToken).AsTask()));
+                            if (leasesCh.Reader.TryRead(out var leaseKeepAliveResponse)
+                                && leaseKeepAliveResponse.TTL > 0)
+                            {
+                                Console.WriteLine("keepAlive" + DateTime.Now);
+                                leases.Add(
+                                    Task.Delay(
+                                        TimeSpan.FromMilliseconds(100),//leaseKeepAliveResponse.TTL / 3.0 * 1000),
+                                        cancellationToken).ContinueWith(
+                                        t => leaseKeepAliveResponse,
+                                        cancellationToken));
+                            }
+
+                            foreach (Task<LeaseKeepAliveResponse> keepAliveResponseTask in leases
+                                         .Where(t => t.IsCompleted).ToArray())
+                            {
+                                var keepAliveResponse = keepAliveResponseTask.Result;
+                                await leaser.RequestStream
+                                    .WriteAsync(new LeaseKeepAliveRequest() { ID = keepAliveResponse.ID })
+                                    .ConfigureAwait(false);
+                                leases.Remove(keepAliveResponseTask);
+                            }
                         }
 
                         await leaser.RequestStream.CompleteAsync().ConfigureAwait(false);
                         await leaserTask.ConfigureAwait(false);
                     }
-                }).ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    retryCount++;
+                    if (retryCount >= _balancer._numNodes)
+                    {
+                        throw;
+                    }
+                }
+            }
+        }
 
         /// <summary>
         /// LeaseTimeToLive retrieves lease information.

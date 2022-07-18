@@ -160,73 +160,67 @@ namespace dotnet_etcd
                 try
                 {
                     var connection = _balancer.GetConnection();
-                    using (AsyncDuplexStreamingCall<LeaseKeepAliveRequest, LeaseKeepAliveResponse> leaser =
-                           connection._leaseClient
-                               .LeaseKeepAlive(
-                                   headers,
-                                   deadline,
-                                   cancellationToken))
+                    using AsyncDuplexStreamingCall<LeaseKeepAliveRequest, LeaseKeepAliveResponse> leaser =
+                        connection._leaseClient
+                            .LeaseKeepAlive(
+                                headers,
+                                deadline,
+                                cancellationToken);
+                    Channel<LeaseKeepAliveRequest> keepAliveRequestChannel =
+                        Channel.CreateUnbounded<LeaseKeepAliveRequest>();
+                    var leaseKeepers = requests
+                        .ToDictionary(
+                            keySelector: r => r.ID,
+                            elementSelector: r => new LeaseKeeper(
+                                r.ID,
+                                keepAliveRequestChannel));
+
+                    foreach (LeaseKeeper lk in leaseKeepers.Values)
                     {
-                        Channel<LeaseKeepAliveResponse> leasesCh = Channel.CreateUnbounded<LeaseKeepAliveResponse>();
-                        Task leaserTask = Task.Run(
-                            async () =>
-                            {
-                                while (await leaser.ResponseStream.MoveNext(cancellationToken).ConfigureAwait(false))
-                                {
-                                    retryCount = 0;
-                                    LeaseKeepAliveResponse update = leaser.ResponseStream.Current;
-                                    foreach (Action<LeaseKeepAliveResponse> method in methods)
-                                    {
-                                        method(update);
-                                    }
-
-                                    await leasesCh.Writer.WriteAsync(
-                                        update,
-                                        cancellationToken);
-                                }
-                            },
-                            cancellationToken);
-
-                        foreach (LeaseKeepAliveRequest request in requests)
-                        {
-                            await leaser.RequestStream
-                                .WriteAsync(request)
-                                .ConfigureAwait(false);
-                        }
-
-                        List<Task<LeaseKeepAliveResponse>> leases = new List<Task<LeaseKeepAliveResponse>>();
-                        while (cancellationToken.IsCancellationRequested == false &&
-                               (leaserTask.IsCompleted == false || leases.Count > 0))
-                        {
-                            await Task.WhenAny(
-                                leases.Select(t => t as Task)
-                                    .Append(leasesCh.Reader.WaitToReadAsync(cancellationToken).AsTask()));
-                            if (leasesCh.Reader.TryRead(out var leaseKeepAliveResponse)
-                                && leaseKeepAliveResponse.TTL > 0)
-                            {
-                                Console.WriteLine("keepAlive" + DateTime.Now);
-                                leases.Add(
-                                    Task.Delay(
-                                        TimeSpan.FromMilliseconds(100),//leaseKeepAliveResponse.TTL / 3.0 * 1000),
-                                        cancellationToken).ContinueWith(
-                                        t => leaseKeepAliveResponse,
-                                        cancellationToken));
-                            }
-
-                            foreach (Task<LeaseKeepAliveResponse> keepAliveResponseTask in leases
-                                         .Where(t => t.IsCompleted).ToArray())
-                            {
-                                var keepAliveResponse = keepAliveResponseTask.Result;
-                                await leaser.RequestStream
-                                    .WriteAsync(new LeaseKeepAliveRequest() { ID = keepAliveResponse.ID })
-                                    .ConfigureAwait(false);
-                                leases.Remove(keepAliveResponseTask);
-                            }
-                        }
-
-                        await leaser.RequestStream.CompleteAsync().ConfigureAwait(false);
-                        await leaserTask.ConfigureAwait(false);
+                        var never = lk.StartKeepAliveAsync(cancellationToken);
                     }
+
+                    Task<bool> responsePromise = leaser.ResponseStream.MoveNext(cancellationToken);
+                    Task<bool> newRequestPromise =
+                        keepAliveRequestChannel.Reader.WaitToReadAsync(cancellationToken).AsTask();
+                    while (true)
+                    {
+                        await Task.WhenAny(
+                            newRequestPromise,
+                            responsePromise).ConfigureAwait(false);
+                        if (newRequestPromise.IsCompleted)
+                        {
+                            if (newRequestPromise.Result == false)
+                            {
+                                break;
+                            }
+
+                            var req = await keepAliveRequestChannel.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+                            await leaser.RequestStream.WriteAsync(req).ConfigureAwait(false);
+                            newRequestPromise =
+                                keepAliveRequestChannel.Reader.WaitToReadAsync(cancellationToken).AsTask();
+                        }
+
+                        if (responsePromise.IsCompleted)
+                        {
+                            if (responsePromise.Result == false)
+                            {
+                                break;
+                            }
+
+                            retryCount = 0;
+                            var rsp = leaser.ResponseStream.Current;
+                            responsePromise = leaser.ResponseStream.MoveNext(cancellationToken);
+                            await leaseKeepers[rsp.ID].KeepAliveResponseReceived(rsp).ConfigureAwait(false);
+                            foreach (Action<LeaseKeepAliveResponse> method in methods)
+                            {
+                                method.Invoke(rsp);
+                            }
+                        }
+                    }
+
+                    await leaser.RequestStream.CompleteAsync().ConfigureAwait(false);
+                    await leaser.ResponseHeadersAsync;
                 }
                 catch (Exception)
                 {

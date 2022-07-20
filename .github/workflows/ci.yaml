@@ -10,8 +10,7 @@ jobs:
 
   build-lib:
     runs-on:
-      - kube-action-runner
-      - kube-common
+      - ubuntu-latest
 
     steps:
       - uses: actions/checkout@v2

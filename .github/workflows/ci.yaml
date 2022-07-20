@@ -44,19 +44,4 @@ jobs:
         env:
           ARTIFACTORY_API: ${{ secrets.ARTIFACTORY_DEV_API }}
 
-  # Пустая джоба, которая завершается после завершения всех required джоб.
-  # Нужна для того, чтобы в branch protection не надо было указывать все билды
-  # из матрицы по одному как required.
-  success:
-    needs:
-      # - lint
-      - build-client
-      - build
-      - helm-chart
 
-    runs-on:
-      - kube-action-runner
-      - kube-common
-
-    steps:
-      - run: echo "Done"

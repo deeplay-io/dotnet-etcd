@@ -5,11 +5,12 @@
      netcoreapp3.1;netstandard2.1;net5.0;net6.0
     </TargetFrameworks>
     <TargetFrameworks Condition="'$(LibraryFrameworks)'!=''">$(LibraryFrameworks)</TargetFrameworks>
+    <PackageId>dotnet-etcd-deeplay</PackageId>
     <RootNamespace>dotnet_etcd</RootNamespace>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
-    <RepositoryUrl>https://github.com/shubhamranjan/dotnet-etcd</RepositoryUrl>
-    <PackageProjectUrl>https://github.com/shubhamranjan/dotnet-etcd</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/deeplay-io/dotnet-etcd</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/deeplay-io/dotnet-etcd</PackageProjectUrl>
     <PackageReleaseNotesBreaking>
       Change:
       - Clients using certs with ssl will break. The lib now accepts a http handler as an argument which users can utilize to manage various aspects of the grpc client like ssl.

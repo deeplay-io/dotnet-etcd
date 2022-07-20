@@ -79,13 +79,15 @@ namespace dotnet_etcd
         /// </summary>
         /// <param name="leaseId"></param>
         /// <param name="cancellationToken"></param>
-        public async Task LeaseKeepAlive(long leaseId, CancellationToken cancellationToken)
+        public async Task LeaseKeepAlive(long leaseId,long lastTTL, CancellationToken cancellationToken)
         {
             var leaseExpiredToken = new TaskCompletionSource<int>();
             var keepAliveTask = LeaseKeepAlive(
                 request: new LeaseKeepAliveRequest { ID = leaseId },
                 method: response =>
                 {
+                  //todo: посмотреть как лиз id может быть не равен запросу
+                     //todo: проверить как работает с ревоком
                     if (response.ID != leaseId || response.TTL == 0) // expired or not found
                     {
                         leaseExpiredToken.SetResult(0);
@@ -185,9 +187,10 @@ namespace dotnet_etcd
                         keepAliveRequestChannel.Reader.WaitToReadAsync(cancellationToken).AsTask();
                     while (true)
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
                         await Task.WhenAny(
                             newRequestPromise,
-                            responsePromise).ConfigureAwait(false);
+                            responsePromise).Unwrap().ConfigureAwait(false);
                         if (newRequestPromise.IsCompleted)
                         {
                             if (newRequestPromise.Result == false)
@@ -195,7 +198,8 @@ namespace dotnet_etcd
                                 break;
                             }
 
-                            var req = await keepAliveRequestChannel.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+                            var req = await keepAliveRequestChannel.Reader.ReadAsync(cancellationToken)
+                                .ConfigureAwait(false);
                             await leaser.RequestStream.WriteAsync(req).ConfigureAwait(false);
                             newRequestPromise =
                                 keepAliveRequestChannel.Reader.WaitToReadAsync(cancellationToken).AsTask();
@@ -219,8 +223,13 @@ namespace dotnet_etcd
                         }
                     }
 
+                    как завершить би стрим
                     await leaser.RequestStream.CompleteAsync().ConfigureAwait(false);
                     await leaser.ResponseHeadersAsync;
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
                 }
                 catch (Exception)
                 {

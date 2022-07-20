@@ -25,6 +25,7 @@ namespace dotnet_etcd
 
         public async Task StartKeepAliveAsync(CancellationToken cancellationToken)
         {
+            если время лизы истечет, а респонса не было
             await _keepAliveRequestChannel.Writer.WriteAsync(
                 new LeaseKeepAliveRequest(){ID = Id},
                 cancellationToken);

@@ -36,7 +36,7 @@ namespace dotnet_etcd.multiplexer
         private static readonly Random s_random = new Random();
 
 
-        internal Balancer(List<Uri> nodes, HttpClientHandler handler = null, bool ssl = false,
+        internal Balancer(List<Uri> nodes, HttpMessageHandler handler = null, bool ssl = false,
             bool useLegacyRpcExceptionForCancellation = false, params Interceptor[] interceptors)
         {
             _numNodes = nodes.Count;

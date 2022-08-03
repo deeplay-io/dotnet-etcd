@@ -204,6 +204,7 @@ namespace dotnet_etcd
                 }
                 catch (RpcException ex)
                 {
+
                     retryCount++;
                     if (retryCount >= _balancer._numNodes)
                     {

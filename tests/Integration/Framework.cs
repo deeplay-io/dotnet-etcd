@@ -17,19 +17,20 @@ public static class Framework
         .Enrich.FromLogContext()
         .CreateLogger();
 
-    public static EtcdClient Client { get; } = new EtcdClient(
-        "http://localhost:23790,http://localhost:23791,http://localhost:23792", //todo: вытащить в конфигурацию
-        useLegacyRpcExceptionForCancellation: false,
-        interceptors: new GrpcLogsInterceptor(
-            Logger,
-            new LogsInterceptorOptions
-            {
-                //LoggerName = null,
-                IncludeLogData = true
-            }));
+    // public static EtcdClient Client { get; } = new EtcdClient(
+    //     "http://localhost:23790,http://localhost:23791,http://localhost:23792", //todo: вытащить в конфигурацию
+    //     useLegacyRpcExceptionForCancellation: false,
+    //     interceptors: new GrpcLogsInterceptor(
+    //         Logger,
+    //         new LogsInterceptorOptions
+    //         {
+    //             //LoggerName = null,
+    //             IncludeLogData = true
+    //         }));
 
-    public static async Task CleanEtcdTestsKeys()
+    public static async Task CleanEtcdTestsKeys(EtcdClient client)
     {
-        await Client.DeleteRangeAsync(TestPrefix);
+        await client.DeleteRangeAsync(TestPrefix);
     }
+    
 }

@@ -9,7 +9,7 @@ namespace DevelopmentSandbox // Note: actual namespace depends on the project na
 {
     internal class Program
     {
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
             ILogger logger = new LoggerConfiguration().MinimumLevel.Verbose().WriteTo.Console(
                     theme: SystemConsoleTheme.Literate,
@@ -18,57 +18,52 @@ namespace DevelopmentSandbox // Note: actual namespace depends on the project na
                 .Enrich.FromLogContext()
                 .CreateLogger();
 
-            HttpMessageHandler handler = new SocketsHttpHandler
-            {
+            // HttpMessageHandler handler = new SocketsHttpHandler
+            // {
+            //
+            //     // ConnectTimeout = default,
+            //     KeepAlivePingDelay = TimeSpan.FromMilliseconds(1000),
+            //     KeepAlivePingTimeout = TimeSpan.FromMilliseconds(1000),
+            //     KeepAlivePingPolicy = HttpKeepAlivePingPolicy.WithActiveRequests,
+            //     //
+            //     // PooledConnectionIdleTimeout = default,
+            //     // PooledConnectionLifetime = default,
+            //     // ResponseDrainTimeout = default
+            // };
+            string connection_string = Environment.GetEnvironmentVariable("ETCD_CONNECTION_STRING");
+            EtcdClient client  = new EtcdClient(connection_string,
+              //  handler: handler,
+                useLegacyRpcExceptionForCancellation: false//,
+                // interceptors: new GrpcLogsInterceptor(
+                //     logger,
+                //     new LogsInterceptorOptions
+                //     {
+                //         //LoggerName = null,
+                //         IncludeLogData = true
+                //     })
+              );
 
-                // ConnectTimeout = default,
-                KeepAlivePingDelay = TimeSpan.FromMilliseconds(1000),
-                KeepAlivePingTimeout = TimeSpan.FromMilliseconds(1000),
-                KeepAlivePingPolicy = HttpKeepAlivePingPolicy.WithActiveRequests,
-                //
-                // PooledConnectionIdleTimeout = default,
-                // PooledConnectionLifetime = default,
-                // ResponseDrainTimeout = default
+            Func<Task> doJob = async () =>
+            {
+                var leaseId = client.LeaseGrant(new LeaseGrantRequest() { TTL = 1 }).ID;
+                await client.HighlyReliableLeaseKeepAlive(
+                    leaseId,
+                    3,
+                    CancellationToken.None);
+                // await client.LeaseKeepAlive(
+                //     leaseId,
+                //     CancellationToken.None);
             };
-            EtcdClient client  = new EtcdClient(
-                "http://127.0.0.1:2379", //todo: вытащить в конфигурацию
-                handler: handler,
-                useLegacyRpcExceptionForCancellation: false,
-                interceptors: new GrpcLogsInterceptor(
-                    logger,
-                    new LogsInterceptorOptions
-                    {
-                        //LoggerName = null,
-                        IncludeLogData = true
-                    }));
-        
 
-            Task.Run(
-                async () =>
-                {
-                    while (true)
-                    {
-                        await Task.Delay(500);
-                        client.Put(
-                            "1",
-                            DateTime.Now.ToString());
-                    }
-                
-                });
-
-            void Rsp(WatchResponse response)
+            var jobs = Enumerable.Range(
+                0,
+                100000).Select(i =>
             {
-                logger.ForContext(
-                        "watchEvent",
-                        response)
-                    .Information("new watch event");
-            }
-
-            client.WatchRange(
-                "",
-                method: (Action<WatchResponse>)Rsp);
-        
-        
+                Console.WriteLine(i);
+                return doJob();
+            });
+            await await Task.WhenAny(jobs);
+            
             logger.Information("endddd");
         }
     }

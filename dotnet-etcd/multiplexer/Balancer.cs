@@ -18,7 +18,7 @@ namespace dotnet_etcd.multiplexer
 
     internal class Balancer
     {
-        private readonly HashSet<Connection> _healthyNode;
+        internal readonly HashSet<Connection> _healthyNode;
 
         /// <summary>
         /// No of etcd nodes
@@ -57,6 +57,7 @@ namespace dotnet_etcd.multiplexer
                         ThrowOperationCanceledOnCancellation = !useLegacyRpcExceptionForCancellation
                     });
                 }
+
                 else
                 {
 #if NETCOREAPP3_1 || NETCOREAPP3_0

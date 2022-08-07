@@ -115,11 +115,11 @@ namespace dotnet_etcd
 
 
         /// <summary>
-        /// LeaseKeepAlive keeps the lease alive by streaming keep alive requests from the client
-        /// to the server and streaming keep alive responses from the server to the client.
+        /// HighlyReliableLeaseKeepAlive keeps lease alive by sending keep alive requests and receiving keep alive responses.
+        /// Reliability is achieved by sequentially sending keep alive requests at short intervals to all etcd nodes
         /// </summary>
-        /// <param name="leaseId"></param>
-        /// <param name="leaseRemainigTTL"></param>
+        /// <param name="leaseId">lease identifier</param>
+        /// <param name="leaseRemainigTTL">the remaining TTL at the time the method was called. used to determine initial deadlines</param>
         /// <param name="cancellationToken"></param>
         /// <exception cref="LeaseExpiredOrNotFoundException">throws an exception if no response
         /// is received within the lease TTL or <paramref name="leaseRemainigTTL"></paramref> </exception>

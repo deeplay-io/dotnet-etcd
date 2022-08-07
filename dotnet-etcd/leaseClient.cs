@@ -132,7 +132,8 @@ namespace dotnet_etcd
                 int retryCount = 0;
                 startNodeIndex = ++startNodeIndex >= _balancer._numNodes ? 0 : startNodeIndex;
                 DateTime leaseExpiredAt = DateTime.Now.ToUniversalTime().AddSeconds(leaseRemainigTTL);
-                var attemptPeriodMs = (int)(leaseRemainigTTL * 0.8 * 1000 / _balancer._numNodes);
+                double attemptPeriodCoefficient = 0.8;
+                int attemptPeriodMs = (int)(leaseRemainigTTL * attemptPeriodCoefficient * 1000 / _balancer._numNodes);
                 IEnumerable<Task<LeaseKeepAliveResponse>> calls = new List<Task<LeaseKeepAliveResponse>>();
                 bool hasSuccessAttempt = false;
                 while (retryCount < _balancer._numNodes)
@@ -140,8 +141,10 @@ namespace dotnet_etcd
                     retryCount++;
                     cancellationToken.ThrowIfCancellationRequested();
                     int currentNodeIndex = startNodeIndex + retryCount;
-                    currentNodeIndex = currentNodeIndex >= _balancer._numNodes ? currentNodeIndex - _balancer._numNodes : currentNodeIndex;
-                    var connection = _balancer._healthyNode.ElementAt(currentNodeIndex);
+                    currentNodeIndex = currentNodeIndex >= _balancer._numNodes
+                        ? currentNodeIndex - _balancer._numNodes
+                        : currentNodeIndex;
+                    Connection connection = _balancer._healthyNode.ElementAt(currentNodeIndex);
                     calls = await NewLeaseTimeToLiveAttempt(
                             calls,
                             leaseId,
@@ -151,7 +154,7 @@ namespace dotnet_etcd
                             cancellationToken)
                         .ConfigureAwait(false);
 
-                    if (IsAnyCallCompletedSuccessfully(calls, out var response))
+                    if (IsAnyCallCompletedSuccessfully(calls, out LeaseKeepAliveResponse response))
                     {
                         if (response.TTL < 1)
                         {
@@ -165,10 +168,13 @@ namespace dotnet_etcd
 
                 if (!hasSuccessAttempt)
                 {
-                    var leaseExpiredDuration =
+                    TimeSpan leaseExpiredDuration =
                         leaseExpiredAt.Subtract(DateTime.Now.ToUniversalTime());
-                    var waitLeaseExpired = Task.Delay(leaseExpiredDuration,
-                        cancellationToken); //todo если лиза уже истекла???
+                    Task waitLeaseExpired = leaseExpiredDuration.TotalMilliseconds <= 0
+                        ? Task.CompletedTask
+                        : Task.Delay(
+                            leaseExpiredDuration,
+                            cancellationToken);
                     Func<IEnumerable<Task<LeaseKeepAliveResponse>>> getRemainigCalls = () => calls.Where(
                         c => c.IsCompleted == false
                              || c.IsCompletedSuccessfully);
@@ -199,7 +205,9 @@ namespace dotnet_etcd
                     hasSuccessAttempt = true;
                     leaseRemainigTTL = response.TTL;
                 }
-                var sleepDelay = (int)(leaseRemainigTTL * 1000 / 3);
+
+                double sleepСoefficient = 1.0/3;
+                int sleepDelay = (int)(leaseRemainigTTL * sleepСoefficient * 1000);
                 await Task.Delay(sleepDelay, cancellationToken);
                 leaseRemainigTTL -= sleepDelay/1000;
             }
@@ -218,8 +226,14 @@ namespace dotnet_etcd
                     {
                         ID = leaseId
                     }, cancellationToken: cancellationToken).ConfigureAwait(false);
-                    var result = await leaser.ResponseStream.MoveNext(cancellationToken);
-
+                    bool result = await leaser.ResponseStream.MoveNext(cancellationToken);
+                    if (!result)
+                    {
+                        throw new RpcException(
+                            new Status(
+                                StatusCode.Aborted,
+                                "didnt receive keepAlive response"));
+                    }
                     await leaser.RequestStream.CompleteAsync().ConfigureAwait(false);
                     return leaser.ResponseStream.Current;
                 }

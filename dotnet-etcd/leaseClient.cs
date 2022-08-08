@@ -208,7 +208,7 @@ namespace dotnet_etcd
 
                 double sleepСoefficient = 1.0/3;
                 int sleepDelay = (int)(leaseRemainigTTL * sleepСoefficient * 1000);
-                await Task.Delay(sleepDelay, cancellationToken);
+                await Task.Delay(sleepDelay, cancellationToken).ConfigureAwait(false);
                 leaseRemainigTTL -= sleepDelay/1000;
             }
 
@@ -226,7 +226,7 @@ namespace dotnet_etcd
                     {
                         ID = leaseId
                     }, cancellationToken: cancellationToken).ConfigureAwait(false);
-                    bool result = await leaser.ResponseStream.MoveNext(cancellationToken);
+                    bool result = await leaser.ResponseStream.MoveNext(cancellationToken).ConfigureAwait(false);
                     if (!result)
                     {
                         throw new RpcException(
@@ -258,7 +258,6 @@ namespace dotnet_etcd
                      calls.Where(c => c.IsCompletedSuccessfully)
                          .Append(attemptDelay)).ConfigureAwait(false);
                  return calls;
-
             }
 
             bool IsAnyCallCompletedSuccessfully(IEnumerable<Task<LeaseKeepAliveResponse>> calls,

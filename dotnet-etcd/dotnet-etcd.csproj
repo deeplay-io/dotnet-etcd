@@ -66,6 +66,8 @@ Advanced uses take advantage of the consistency guarantees to implement database
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
     </PackageReference>
+    <PackageReference Include="Polly" Version="7.2.3" />
+    <PackageReference Include="Polly.Contrib.WaitAndRetry" Version="1.1.1" />
     <PackageReference Include="System.Threading.Channels" Version="6.0.0" />
 
     <Protobuf Include="grpc\proto\etcd\auth.proto" GrpcServices="Client" />

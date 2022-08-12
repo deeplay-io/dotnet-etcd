@@ -5,7 +5,7 @@ services:
     image: "gcr.io/etcd-development/etcd:v3.5.0-beta.4"
     ports:
       - "23790:2379"
-      - "23792379"
+      - "2379:2379"
     command:
       [
         "etcd",

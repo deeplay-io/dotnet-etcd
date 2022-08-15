@@ -3,6 +3,8 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Net.Http.Headers;
@@ -124,14 +126,14 @@ namespace dotnet_etcd
         /// </summary>
         /// <param name="leaseId">lease identifier</param>
         /// <param name="leaseRemainigTTL">the remaining TTL at the time the method was called. used to determine initial deadlines</param>
-        /// <param name="tryDurationMs"></param>
+        /// <param name="retryDurationMs"></param>
         /// <param name="maxRetryBackoffMs"></param>
         /// <param name="sleepAfterSuccessMs"></param>
         /// <param name="cancellationToken"></param>
         /// <exception cref="LeaseExpiredOrNotFoundException">throws the exception if lease not found, expired, revoked or keep alive unsuccessfully
         /// is received within the lease TTL or <paramref name="leaseRemainigTTL"></paramref> </exception>
         public async Task HighlyReliableLeaseKeepAliveAsync(long leaseId, long leaseRemainigTTL,
-            int tryDurationMs, int maxRetryBackoffMs, int sleepAfterSuccessMs, CancellationToken cancellationToken)
+            int retryDurationMs, int maxRetryBackoffMs, int sleepAfterSuccessMs, CancellationToken cancellationToken)
         {
             int startNodeIndex = (new Random()).Next(_balancer._numNodes);
             while (true) // keepAlive  rounds
@@ -139,7 +141,7 @@ namespace dotnet_etcd
                 cancellationToken.ThrowIfCancellationRequested();
                 var roundCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 int usedKeepAliveJobs = 0;
-                int delayBetweenUseNewKeepAliveJob = tryDurationMs / _balancer._numNodes;
+                int delayBetweenUseNewKeepAliveJob = retryDurationMs / _balancer._numNodes;
                 startNodeIndex = ++startNodeIndex >= _balancer._numNodes ? 0 : startNodeIndex;
                 DateTime leaseExpiredAt = DateTime.Now.ToUniversalTime().AddSeconds(leaseRemainigTTL);
                 List<Task<LeaseKeepAliveResponse>> keepAliveJobs = new List<Task<LeaseKeepAliveResponse>>();
@@ -152,19 +154,21 @@ namespace dotnet_etcd
                         ? currentNodeIndex - _balancer._numNodes
                         : currentNodeIndex;
                     Connection connection = _balancer._healthyNode.ElementAt(currentNodeIndex);
-
-                    Task<LeaseKeepAliveResponse> keepAliveJob = await InvokeWithWaitLimitAsync(
-                        () => OneTimeKeepAliveWithRetryAsync(
-                            leaseId,
-                            connection,
-                            tryDurationMs,
-                            maxRetryBackoffMs,
-                            leaseExpiredAt,
-                            roundCancellationTokenSource.Token),
-                        waitLimitMs: delayBetweenUseNewKeepAliveJob,
-                        cancellationToken: roundCancellationTokenSource.Token);
+                    Task<LeaseKeepAliveResponse> keepAliveJob = RetryUntilKeepAliveResponseAsync(
+                        leaseId,
+                        connection,
+                        retryDurationMs,
+                        maxRetryBackoffMs,
+                        leaseExpiredAt,
+                        roundCancellationTokenSource.Token);
                     keepAliveJobs.Add(keepAliveJob);
-                    if (IsAnyTaskCompletedSuccessfully(keepAliveJobs, out var _))
+
+                    await WhenAnySuccessLimitedAsync(
+                        keepAliveJobs,
+                        waitLimitMs: delayBetweenUseNewKeepAliveJob,
+                        cancellationToken: roundCancellationTokenSource.Token).ConfigureAwait(false);
+
+                    if (IsAnyCompletedSuccessfully(keepAliveJobs, out var _))
                     {
                         roundCancellationTokenSource.Cancel();
                         break;
@@ -173,14 +177,14 @@ namespace dotnet_etcd
 
                 try
                 {
-                    await Task.WhenAll(keepAliveJobs.ToArray());
+                    await Task.WhenAll(keepAliveJobs.ToArray()).ConfigureAwait(false);
                 }
                 catch (Exception e)
                 {
                     // ignored exceptions will handled later
                 }
 
-                if (IsAnyTaskCompletedSuccessfully(
+                if (IsAnyCompletedSuccessfully(
                         keepAliveJobs,
                         out var keepAliveResponse)
                     && keepAliveResponse.TTL > 0)
@@ -188,7 +192,7 @@ namespace dotnet_etcd
 
                     await Task.Delay(
                         sleepAfterSuccessMs,
-                        cancellationToken);
+                        cancellationToken).ConfigureAwait(false);
                     leaseRemainigTTL = Math.Max(0,keepAliveResponse.TTL - sleepAfterSuccessMs / 1000);
                     continue; //go to next round
                 }
@@ -197,27 +201,34 @@ namespace dotnet_etcd
                 {
                     new LeaseExpiredOrNotFoundException(leaseId),
                 };
-                exceptions.AddRange(
-                    keepAliveJobs
-                        .Where(job => !job.IsCompletedSuccessfully)
-                        .Select(job => job.Exception)); // collect all exceptions
+                exceptions.AddRange(keepAliveJobs
+                    .Select(job => job.Exception)
+                    .Where(exception=>exception != null)); // collect all exceptions
                 throw new AggregateException(exceptions);
             }
 
-            async Task<Task<T>> InvokeWithWaitLimitAsync<T>(Func<Task<T>> func, int waitLimitMs, CancellationToken cancellationToken)
+            async Task WhenAnySuccessLimitedAsync(IEnumerable<Task> tasks,int waitLimitMs, CancellationToken cancellationToken)
             {
+                List<Task> runningTasks = new List<Task>(tasks ?? Array.Empty<Task>());
                 Task waitLimit = Task.Delay(
                     waitLimitMs,
                     cancellationToken);
-                var responseTask = func();
-                await Task.WhenAny(responseTask,waitLimit).ConfigureAwait(false);
-                return responseTask;
+                while (runningTasks.Count > 0)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    Task completed = await Task.WhenAny(runningTasks.Append(waitLimit)).ConfigureAwait(false);
+                    if (completed.IsCompletedSuccessfully || completed == waitLimit)
+                    {
+                        return;
+                    }
+                    runningTasks.Remove(completed);
+                }
             }
 
 
 
-            async Task<LeaseKeepAliveResponse> OneTimeKeepAliveWithRetryAsync(long leaseId, Connection connection,
-                int tryDurationMs, int maxRetryBackoffMs, DateTime deadline, CancellationToken cancellationToken)
+            async Task<LeaseKeepAliveResponse> RetryUntilKeepAliveResponseAsync(long leaseId, Connection connection,
+                int retryDurationMs, int maxRetryBackoffMs, DateTime deadline, CancellationToken cancellationToken)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 // timeoutPolicy thrown own exception, that overlap retry exceptions,
@@ -226,7 +237,8 @@ namespace dotnet_etcd
                 var timeout = deadline.ToUniversalTime() - DateTime.Now.ToUniversalTime();
                 var timeoutPolicy = Policy.TimeoutAsync(timeout);
                 TimeSpan maxRetryBackoff = TimeSpan.FromMilliseconds(maxRetryBackoffMs);
-                var delay = Backoff.DecorrelatedJitterBackoffV2(
+                var retryDelay =
+                    Backoff.DecorrelatedJitterBackoffV2(
                         fastFirst: true,
                         medianFirstRetryDelay: TimeSpan.FromMilliseconds(100),
                         retryCount: int.MaxValue)
@@ -238,9 +250,9 @@ namespace dotnet_etcd
                 var retryPolicy = Policy
                     .Handle<Exception>(e => e is LeaseExpiredOrNotFoundException == false)
                     .WaitAndRetryAsync(
-                        delay,
+                        retryDelay,
                         onRetry: (exception, _) => retryExceptions.Add(exception));
-                var retryTimeoutPolicy = Policy.TimeoutAsync(TimeSpan.FromMilliseconds(tryDurationMs));
+                var retryTimeoutPolicy = Policy.TimeoutAsync(TimeSpan.FromMilliseconds(retryDurationMs));
                 var policy =
                     Policy.WrapAsync(
                         timeoutPolicy,
@@ -253,28 +265,27 @@ namespace dotnet_etcd
                         cancellationToken: cancellationToken,
                         action: async retryCancellationToken =>
                         {
+                    // var retryCancellationToken = cancellationToken;
                             retryCancellationToken.ThrowIfCancellationRequested();
-                            using (AsyncDuplexStreamingCall<LeaseKeepAliveRequest, LeaseKeepAliveResponse> leaser =
-                                   connection._leaseClient
-                                       .LeaseKeepAlive(cancellationToken: retryCancellationToken))
+                            using AsyncDuplexStreamingCall<LeaseKeepAliveRequest, LeaseKeepAliveResponse> leaser =
+                                connection._leaseClient
+                                    .LeaseKeepAlive(cancellationToken: retryCancellationToken);
+                            // ReSharper disable once MethodSupportsCancellation //method doesn't support cancellation
+                            await leaser.RequestStream.WriteAsync(
+                                new LeaseKeepAliveRequest() { ID = leaseId });
+                            bool result = await leaser.ResponseStream.MoveNext(retryCancellationToken)
+                                .ConfigureAwait(false);
+                            if (!result)
                             {
-                                // ReSharper disable once MethodSupportsCancellation //method doesn't support cancellation
-                                await leaser.RequestStream.WriteAsync(
-                                    new LeaseKeepAliveRequest() { ID = leaseId }).ConfigureAwait(false);
-                                bool result = await leaser.ResponseStream.MoveNext(retryCancellationToken)
-                                    .ConfigureAwait(false);
-                                if (!result)
-                                {
-                                    throw new RpcException(
-                                        new Status(
-                                            StatusCode.Aborted,
-                                            "didnt receive keepAlive response"));
-                                }
-
-                                await leaser.RequestStream.CompleteAsync().ConfigureAwait(false);
-                                return leaser.ResponseStream.Current;
+                                throw new RpcException(
+                                    new Status(
+                                        StatusCode.Aborted,
+                                        "didnt receive keepAlive response"));
                             }
-                        });
+
+                            await leaser.RequestStream.CompleteAsync();
+                            return leaser.ResponseStream.Current;
+                        }).ConfigureAwait(false);
                     return response;
                 }
                 catch (TimeoutRejectedException e)
@@ -286,7 +297,7 @@ namespace dotnet_etcd
                 }
             }
 
-            bool IsAnyTaskCompletedSuccessfully<T>(IEnumerable<Task<T>> tasks,
+            bool IsAnyCompletedSuccessfully<T>(IEnumerable<Task<T>> tasks,
                 out T response)
             {
                 foreach (Task<T> call in tasks)

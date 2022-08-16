@@ -47,8 +47,8 @@ namespace DevelopmentSandbox // Note: actual namespace depends on the project na
                 await client.HighlyReliableLeaseKeepAliveAsync(
                     leaseId,
                     5,
-                    retryDurationMs: 5000,
-                    maxRetryBackoffMs: 5000,
+                    retryDurationMs: 1000,
+                    maxRetryBackoffMs: 400,
                     sleepAfterSuccessMs: 5000 / 3,
                     CancellationToken.None).ConfigureAwait(false);
                 

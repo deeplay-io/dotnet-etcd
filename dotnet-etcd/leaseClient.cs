@@ -202,26 +202,26 @@ namespace dotnet_etcd
                     new LeaseExpiredOrNotFoundException(leaseId),
                 };
                 exceptions.AddRange(keepAliveJobs
-                    .Select(job => job.Exception)
+                    .SelectMany(job => job.Exception?.InnerExceptions)
                     .Where(exception=>exception != null)); // collect all exceptions
                 throw new AggregateException(exceptions);
             }
 
             async Task WhenAnySuccessLimitedAsync(IEnumerable<Task> tasks,int waitLimitMs, CancellationToken cancellationToken)
             {
-                List<Task> runningTasks = new List<Task>(tasks ?? Array.Empty<Task>());
+                List<Task> runningTasks = tasks?.ToList() ?? new List<Task>();
                 Task waitLimit = Task.Delay(
                     waitLimitMs,
                     cancellationToken);
                 while (runningTasks.Count > 0)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    Task completed = await Task.WhenAny(runningTasks.Append(waitLimit)).ConfigureAwait(false);
-                    if (completed.IsCompletedSuccessfully || completed == waitLimit)
+                    Task completedTask = await Task.WhenAny(runningTasks.Append(waitLimit)).ConfigureAwait(false);
+                    if (completedTask.IsCompletedSuccessfully || completedTask == waitLimit)
                     {
                         return;
                     }
-                    runningTasks.Remove(completed);
+                    runningTasks.Remove(completedTask);
                 }
             }
 
@@ -234,20 +234,17 @@ namespace dotnet_etcd
                 // timeoutPolicy thrown own exception, that overlap retry exceptions,
                 // so this list used for catch the retry exceptions.
                 List<Exception> retryExceptions = new List<Exception>();
-                var timeout = deadline.ToUniversalTime() - DateTime.Now.ToUniversalTime();
-                var timeoutPolicy = Policy.TimeoutAsync(timeout);
+                var timeoutPolicy = Policy.TimeoutAsync(deadline.ToUniversalTime() - DateTime.Now.ToUniversalTime());
+
                 TimeSpan maxRetryBackoff = TimeSpan.FromMilliseconds(maxRetryBackoffMs);
                 var retryDelay =
                     Backoff.DecorrelatedJitterBackoffV2(
-                        fastFirst: true,
-                        medianFirstRetryDelay: TimeSpan.FromMilliseconds(100),
-                        retryCount: int.MaxValue)
-                    .Select(
-                        s => TimeSpan.FromTicks(
-                            Math.Min(
-                                s.Ticks,
-                                maxRetryBackoff.Ticks)));
+                            fastFirst: true,
+                            medianFirstRetryDelay: TimeSpan.FromMilliseconds(100),
+                            retryCount: int.MaxValue)
+                        .Select(s => s < maxRetryBackoff ? s : maxRetryBackoff);
                 var retryPolicy = Policy
+                        //retry on all exceptions except LeaseExpiredOrNotFoundException
                     .Handle<Exception>(e => e is LeaseExpiredOrNotFoundException == false)
                     .WaitAndRetryAsync(
                         retryDelay,
@@ -265,7 +262,6 @@ namespace dotnet_etcd
                         cancellationToken: cancellationToken,
                         action: async retryCancellationToken =>
                         {
-                    // var retryCancellationToken = cancellationToken;
                             retryCancellationToken.ThrowIfCancellationRequested();
                             using AsyncDuplexStreamingCall<LeaseKeepAliveRequest, LeaseKeepAliveResponse> leaser =
                                 connection._leaseClient

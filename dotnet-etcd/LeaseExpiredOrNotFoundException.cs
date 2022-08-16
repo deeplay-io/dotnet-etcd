@@ -11,7 +11,7 @@ namespace dotnet_etcd
     {
         private readonly long _leaseId;
 
-        public LeaseExpiredOrNotFoundException(long leaseId)  : base("leaseId=" + leaseId)
+        public LeaseExpiredOrNotFoundException(long leaseId)  : base("LeaseExpiredOrNotFoundException: leaseId=" + leaseId)
         {
             _leaseId = leaseId;
         }

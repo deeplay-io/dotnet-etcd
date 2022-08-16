@@ -50,7 +50,7 @@ namespace DevelopmentSandbox // Note: actual namespace depends on the project na
                     retryDurationMs: 1000,
                     maxRetryBackoffMs: 400,
                     sleepAfterSuccessMs: 5000 / 3,
-                    CancellationToken.None).ConfigureAwait(false);
+                    cts.Token).ConfigureAwait(false);
                 
                 // await client.LeaseKeepAlive(
                 //     leaseId,

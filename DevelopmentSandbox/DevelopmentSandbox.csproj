@@ -15,6 +15,7 @@
 
     <ItemGroup>
       <ProjectReference Include="..\dotnet-etcd\dotnet-etcd.csproj" />
+      <ProjectReference Include="..\tests\Integration\Integration.csproj" />
     </ItemGroup>
 
 </Project>

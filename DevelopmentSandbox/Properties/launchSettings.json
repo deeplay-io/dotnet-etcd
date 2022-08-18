@@ -4,7 +4,7 @@
     "DevelopmentSandbox": {
       "commandName": "Project",
       "environmentVariables": {
-        "ETCD_CONNECTION_STRING": "http://127.0.0.1:23790,http://127.0.0.1:23791,http://127.0.0.1:23792"
+        "ETCD_CONNECTION_STRING": "http://127.0.0.1:23790,http://127.0.0.1:23790,http://127.0.0.1:23790"
       }
     }
   }

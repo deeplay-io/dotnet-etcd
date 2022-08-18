@@ -143,12 +143,13 @@ namespace dotnet_etcd
                 int usedKeepAliveJobs = 0;
                 int delayBetweenUseNewKeepAliveJob = retryDurationMs / _balancer._numNodes;
                 startNodeIndex = ++startNodeIndex >= _balancer._numNodes ? 0 : startNodeIndex;
-                DateTime leaseExpiredAt = DateTime.Now.ToUniversalTime().AddSeconds(leaseRemainigTTL);
+                DateTime leaseExpiredAt = DateTime.UtcNow.AddSeconds(leaseRemainigTTL);
                 List<Task<LeaseKeepAliveResponse>> keepAliveJobs = new List<Task<LeaseKeepAliveResponse>>();
                 while (usedKeepAliveJobs < _balancer._numNodes)
                 {
                     usedKeepAliveJobs++;
                     roundCancellationTokenSource.Token.ThrowIfCancellationRequested();
+                    //todo: вынести работу с выбором ноды в отдельный метод
                     int currentNodeIndex = startNodeIndex + usedKeepAliveJobs;
                     currentNodeIndex = currentNodeIndex >= _balancer._numNodes
                         ? currentNodeIndex - _balancer._numNodes
@@ -177,6 +178,7 @@ namespace dotnet_etcd
 
                 try
                 {
+                    //todo: не понятно что дедлайн лизы заложен внутри джоб, подумать как сделать проще
                     await Task.WhenAll(keepAliveJobs.ToArray()).ConfigureAwait(false);
                 }
                 catch (Exception e)
@@ -234,18 +236,18 @@ namespace dotnet_etcd
                 // timeoutPolicy thrown own exception, that overlap retry exceptions,
                 // so this list used for catch the retry exceptions.
                 List<Exception> retryExceptions = new List<Exception>();
-                var timeoutPolicy = Policy.TimeoutAsync(deadline.ToUniversalTime() - DateTime.Now.ToUniversalTime());
+                var timeoutPolicy = Policy.TimeoutAsync(deadline - DateTime.UtcNow);
 
                 TimeSpan maxRetryBackoff = TimeSpan.FromMilliseconds(maxRetryBackoffMs);
                 var retryDelay =
                     Backoff.DecorrelatedJitterBackoffV2(
                             fastFirst: true,
-                            medianFirstRetryDelay: TimeSpan.FromMilliseconds(100),
+                            medianFirstRetryDelay: TimeSpan.FromMilliseconds(100), //todo: вынести в параметры
                             retryCount: int.MaxValue)
                         .Select(s => s < maxRetryBackoff ? s : maxRetryBackoff);
                 var retryPolicy = Policy
                         //retry on all exceptions except LeaseExpiredOrNotFoundException
-                    .Handle<Exception>(e => e is LeaseExpiredOrNotFoundException == false)
+                    .Handle<Exception>()
                     .WaitAndRetryAsync(
                         retryDelay,
                         onRetry: (exception, _) => retryExceptions.Add(exception));
@@ -257,7 +259,7 @@ namespace dotnet_etcd
                         retryTimeoutPolicy);
                 try
                 {
-                    var response = await policy.ExecuteAsync(
+                    LeaseKeepAliveResponse response = await policy.ExecuteAsync(
                         continueOnCapturedContext: false,
                         cancellationToken: cancellationToken,
                         action: async retryCancellationToken =>

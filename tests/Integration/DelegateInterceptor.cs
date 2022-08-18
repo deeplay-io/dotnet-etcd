@@ -1,9 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Grpc.Core;
 using Grpc.Core.Interceptors;
+using Grpc.Net.Client;
 
 namespace Integration;
 
@@ -11,9 +15,8 @@ public class DelegateInterceptor<TReq, TRsp> : Interceptor
     where TReq : class
     where TRsp : class
 {
-    private readonly MessageChannel<TReq> _requests = new();
-
-    private readonly MessageChannel<TRsp> _responses = new();
+    private readonly MessageStore _requestsStore = new();
+    private readonly MessageStore _responsesStore = new();
 
     public override AsyncUnaryCall<TResponse> AsyncUnaryCall<TRequest, TResponse>(TRequest request,
         ClientInterceptorContext<TRequest, TResponse> context,
@@ -21,10 +24,14 @@ public class DelegateInterceptor<TReq, TRsp> : Interceptor
     {
         ValidateCall<TRequest, TResponse>();
 
-        Task.Run(() => _requests.CastMessageType<TRequest>().WriteAsync(request)).Wait();
-        var responseReceived = Task.Run(() => _responses.MoveNext()).Result;
-        if (!responseReceived) throw new Exception("response required");
-        var response = _responses.CastMessageType<TResponse>().Current;
+
+        string address = GetEtcdAdders(continuation);
+        _requestsStore.WriteAsync(
+            address,
+            request).Wait();
+        var enumerator = _responsesStore.GetReader<TResponse>(address);
+        if (!enumerator.MoveNext().Result) throw new Exception("response required");
+        var response = enumerator.Current;
         var call = new AsyncUnaryCall<TResponse>(
             responseAsync: Task.FromResult(response),
             responseHeadersAsync: Task.FromResult(new Metadata()),
@@ -41,46 +48,52 @@ public class DelegateInterceptor<TReq, TRsp> : Interceptor
         BlockingUnaryCallContinuation<TRequest, TResponse> continuation)
     {
         ValidateCall<TRequest, TResponse>();
-
-        Task.Run(() => _requests.WriteAsync((request as TReq)!)).Wait();
-        var responseReceived = Task.Run(() => _responses.MoveNext()).Result;
-        if (!responseReceived) throw new Exception("response required");
-        return _requests.CastMessageType<TResponse>().Current;
+    
+        string address = GetEtcdAdders(continuation);
+        _requestsStore.WriteAsync(
+            address,
+            request).Wait();
+        var enumerator = _responsesStore.GetReader<TResponse>(address);
+        if (!enumerator.MoveNext().Result) throw new Exception("response required");
+        return enumerator.Current;
     }
-
+    
     public override AsyncClientStreamingCall<TRequest, TResponse> AsyncClientStreamingCall<TRequest, TResponse>(
         ClientInterceptorContext<TRequest, TResponse> context,
         AsyncClientStreamingCallContinuation<TRequest, TResponse> continuation)
     {
         ValidateCall<TRequest, TResponse>();
-
+        string address = GetEtcdAdders(continuation);
+        var reader = _responsesStore.GetReader<TResponse>(address);
         var call = new AsyncClientStreamingCall<TRequest, TResponse>(
-            requestStream: _requests.CastMessageType<TRequest>(),
+            requestStream: _requestsStore.GetWriter<TRequest>(address),
             responseHeadersAsync: Task.FromResult(new Metadata()),
             getStatusFunc: () => new Status(
                 statusCode: StatusCode.OK,
                 detail: ""),
             getTrailersFunc: () => new Metadata(),
             disposeAction: () => { },
-            responseAsync: _responses.MoveNext().ContinueWith(moveNextask =>
-            {
-                var responseReceived = moveNextask.Result;
-                if (!responseReceived) throw new Exception("response required");
-                return _responses.CastMessageType<TResponse>().Current;
-            }));
+            responseAsync: Task.Run(
+                async () =>
+                {
+                    await reader.MoveNext();
+                    return reader.Current;
+                }));
         return call;
     }
-
-
+    
+    
     public override AsyncServerStreamingCall<TResponse> AsyncServerStreamingCall<TRequest, TResponse>(TRequest request,
         ClientInterceptorContext<TRequest, TResponse> context,
         AsyncServerStreamingCallContinuation<TRequest, TResponse> continuation)
     {
         ValidateCall<TRequest, TResponse>();
-        
-        Task.Run(() => _requests.WriteAsync((request as TReq)!)).Wait();
+        string address = GetEtcdAdders(continuation);
+        _requestsStore.WriteAsync(
+            address,
+            request).Wait();
         var call = new AsyncServerStreamingCall<TResponse>(
-            responseStream: _responses.CastMessageType<TResponse>(),
+            responseStream: _responsesStore.GetReader<TResponse>(address),
             responseHeadersAsync: Task.FromResult(new Metadata()),
             getStatusFunc: () => new Status(
                 statusCode: StatusCode.OK,
@@ -89,15 +102,18 @@ public class DelegateInterceptor<TReq, TRsp> : Interceptor
             disposeAction: () => { });
         return call;
     }
-
-
+    
+    
     public override AsyncDuplexStreamingCall<TRequest, TResponse> AsyncDuplexStreamingCall<TRequest, TResponse>(
         ClientInterceptorContext<TRequest, TResponse> context,
         AsyncDuplexStreamingCallContinuation<TRequest, TResponse> continuation)
     {
+        ValidateCall<TRequest, TResponse>();
+        string address = GetEtcdAdders(continuation);
+        
         AsyncDuplexStreamingCall<TRequest, TResponse> call = new(
-            requestStream: _requests.CastMessageType<TRequest>(),
-            responseStream: _responses.CastMessageType<TResponse>(),
+            requestStream: _requestsStore.GetWriter<TRequest>(address),
+            responseStream: _responsesStore.GetReader<TResponse>(address),
             responseHeadersAsync: Task.FromResult(new Metadata()),
             getStatusFunc: () => new Status(
                 statusCode: StatusCode.OK,
@@ -108,29 +124,53 @@ public class DelegateInterceptor<TReq, TRsp> : Interceptor
     }
 
 
-    public async Task WriteResponseAsync(TRsp rsp)
+    public async Task WriteResponseAsync(string address, TRsp rsp)
     {
-        await _responses.WriteAsync(rsp);
+        await _responsesStore.WriteAsync(address,rsp);
     }
 
-    public async Task WriteResponseAsync(Exception exception)
+    public async Task WriteResponseAsync(string address, Exception exception)
     {
-        await _responses.WriteExceptionAsync(exception);
+        await _responsesStore.WriteAsync(
+            address,
+            null,
+            exception);
     }
 
-    public async Task CloseResponseStreamAsync()
+    public async Task CloseResponseStreamAsync(string address)
     {
-        await _responses.CompleteAsync();
+        throw new NotImplementedException();
     }
 
-    public IAsyncEnumerable<TReq> ReadAllRequests(CancellationToken cancellationToken)
+    public IAsyncEnumerable<TReq> ReadAllRequests(string address, CancellationToken cancellationToken)
     {
-        return _requests.ReadAllAsync(cancellationToken);
+        return _requestsStore.GetReader<TReq>(address).ReadAllAsync(cancellationToken);
+    }
+    
+    public async IAsyncEnumerable<(string address, TReq message)> ReadAllRequests(CancellationToken cancellationToken)
+    {
+        await foreach (var (address, message, exception) in _requestsStore.ReadMessages())
+        {
+            if (exception != null) throw exception;
+            yield return (address, (TReq)message!);
+        }
     }
 
     private static void ValidateCall<TRequest, TResponse>()
     {
         if (typeof(TReq) != typeof(TRequest) || typeof(TRsp) != typeof(TResponse))
             throw new Exception("Interceptor not applicable to these call");
+    }
+
+    private static string GetEtcdAdders(Delegate continuation)
+    {
+        object target = continuation.Target!;
+        object invoker = target.GetType().GetField("invoker",BindingFlags.Instance|BindingFlags.NonPublic)!
+            .GetValue(target)!;
+        GrpcChannel channel = (GrpcChannel)invoker.GetType()
+            .GetProperty(
+                "Channel",
+                BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(invoker)!;
+        return channel.Target;
     }
 }

@@ -1,7 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,29 +7,35 @@ using Grpc.Core;
 using Grpc.Core.Interceptors;
 using Grpc.Net.Client;
 
-namespace Integration;
+namespace Integration.Utils;
 
-public class DelegateInterceptor<TReq, TRsp> : Interceptor
+internal class DelegateInterceptor<TReq, TRsp> : Interceptor
     where TReq : class
     where TRsp : class
 {
     private readonly MessageStore _requestsStore = new();
     private readonly MessageStore _responsesStore = new();
+    private readonly bool _ignoreCallId = false;
 
+    public DelegateInterceptor(bool ignoreCallId = false)
+    {
+        _ignoreCallId = ignoreCallId;
+    }
     public override AsyncUnaryCall<TResponse> AsyncUnaryCall<TRequest, TResponse>(TRequest request,
         ClientInterceptorContext<TRequest, TResponse> context,
         AsyncUnaryCallContinuation<TRequest, TResponse> continuation)
     {
         ValidateCall<TRequest, TResponse>();
-
-
+        Guid callId = _ignoreCallId? Guid.Empty : Guid.NewGuid();
         string address = GetEtcdAdders(continuation);
         _requestsStore.WriteAsync(
-            address,
+            address, callId,
             request).Wait();
-        var enumerator = _responsesStore.GetReader<TResponse>(address);
+        _requestsStore.Complete(address, callId);
+        var enumerator = _responsesStore.GetReader<TResponse>(address,callId);
         if (!enumerator.MoveNext().Result) throw new Exception("response required");
         var response = enumerator.Current;
+        _responsesStore.Complete(address,callId);
         var call = new AsyncUnaryCall<TResponse>(
             responseAsync: Task.FromResult(response),
             responseHeadersAsync: Task.FromResult(new Metadata()),
@@ -48,13 +52,15 @@ public class DelegateInterceptor<TReq, TRsp> : Interceptor
         BlockingUnaryCallContinuation<TRequest, TResponse> continuation)
     {
         ValidateCall<TRequest, TResponse>();
-    
+        Guid callId = _ignoreCallId? Guid.Empty : Guid.NewGuid();
         string address = GetEtcdAdders(continuation);
         _requestsStore.WriteAsync(
-            address,
+            address,callId,
             request).Wait();
-        var enumerator = _responsesStore.GetReader<TResponse>(address);
+        _requestsStore.Complete(address, callId);
+        var enumerator = _responsesStore.GetReader<TResponse>(address,callId);
         if (!enumerator.MoveNext().Result) throw new Exception("response required");
+        _responsesStore.Complete(address,callId);
         return enumerator.Current;
     }
     
@@ -63,10 +69,11 @@ public class DelegateInterceptor<TReq, TRsp> : Interceptor
         AsyncClientStreamingCallContinuation<TRequest, TResponse> continuation)
     {
         ValidateCall<TRequest, TResponse>();
+        Guid callId = _ignoreCallId? Guid.Empty : Guid.NewGuid();
         string address = GetEtcdAdders(continuation);
-        var reader = _responsesStore.GetReader<TResponse>(address);
+        var reader = _responsesStore.GetReader<TResponse>(address,callId);
         var call = new AsyncClientStreamingCall<TRequest, TResponse>(
-            requestStream: _requestsStore.GetWriter<TRequest>(address),
+            requestStream: _requestsStore.GetWriter<TRequest>(address, callId),
             responseHeadersAsync: Task.FromResult(new Metadata()),
             getStatusFunc: () => new Status(
                 statusCode: StatusCode.OK,
@@ -77,6 +84,7 @@ public class DelegateInterceptor<TReq, TRsp> : Interceptor
                 async () =>
                 {
                     await reader.MoveNext();
+                    _responsesStore.Complete(address,callId);
                     return reader.Current;
                 }));
         return call;
@@ -88,12 +96,14 @@ public class DelegateInterceptor<TReq, TRsp> : Interceptor
         AsyncServerStreamingCallContinuation<TRequest, TResponse> continuation)
     {
         ValidateCall<TRequest, TResponse>();
+        Guid callId = _ignoreCallId? Guid.Empty : Guid.NewGuid();
         string address = GetEtcdAdders(continuation);
         _requestsStore.WriteAsync(
-            address,
+            address,callId,
             request).Wait();
+        _requestsStore.Complete(address, callId);
         var call = new AsyncServerStreamingCall<TResponse>(
-            responseStream: _responsesStore.GetReader<TResponse>(address),
+            responseStream: _responsesStore.GetReader<TResponse>(address,callId),
             responseHeadersAsync: Task.FromResult(new Metadata()),
             getStatusFunc: () => new Status(
                 statusCode: StatusCode.OK,
@@ -109,11 +119,11 @@ public class DelegateInterceptor<TReq, TRsp> : Interceptor
         AsyncDuplexStreamingCallContinuation<TRequest, TResponse> continuation)
     {
         ValidateCall<TRequest, TResponse>();
+        Guid callId = _ignoreCallId? Guid.Empty : Guid.NewGuid();
         string address = GetEtcdAdders(continuation);
-        
         AsyncDuplexStreamingCall<TRequest, TResponse> call = new(
-            requestStream: _requestsStore.GetWriter<TRequest>(address),
-            responseStream: _responsesStore.GetReader<TResponse>(address),
+            requestStream: _requestsStore.GetWriter<TRequest>(address,callId),
+            responseStream: _responsesStore.GetReader<TResponse>(address,callId),
             responseHeadersAsync: Task.FromResult(new Metadata()),
             getStatusFunc: () => new Status(
                 statusCode: StatusCode.OK,
@@ -124,35 +134,35 @@ public class DelegateInterceptor<TReq, TRsp> : Interceptor
     }
 
 
-    public async Task WriteResponseAsync(string address, TRsp rsp)
+    public async Task WriteResponseAsync(string address,Guid callId, TRsp rsp)
     {
-        await _responsesStore.WriteAsync(address,rsp);
+        await _responsesStore.WriteAsync(address, callId,rsp);
     }
 
-    public async Task WriteResponseAsync(string address, Exception exception)
+    public async Task WriteResponseAsync(string address, Guid callId, Exception exception)
     {
         await _responsesStore.WriteAsync(
-            address,
+            address, callId,
             null,
             exception);
     }
 
-    public async Task CloseResponseStreamAsync(string address)
+    public async Task CloseResponseStreamAsync(string address, Guid callId)
     {
-        throw new NotImplementedException();
+        _responsesStore.Complete(address,callId);
     }
 
-    public IAsyncEnumerable<TReq> ReadAllRequests(string address, CancellationToken cancellationToken)
+    public IAsyncEnumerable<TReq> ReadAllRequests(string address, Guid callId, CancellationToken cancellationToken)
     {
-        return _requestsStore.GetReader<TReq>(address).ReadAllAsync(cancellationToken);
+        return _requestsStore.GetReader<TReq>(address, callId).ReadAllAsync(cancellationToken);
     }
     
-    public async IAsyncEnumerable<(string address, TReq message)> ReadAllRequests(CancellationToken cancellationToken)
+    public async IAsyncEnumerable<(string address, Guid callId, TReq message, bool closed)> ReadAllRequests(CancellationToken cancellationToken)
     {
-        await foreach (var (address, message, exception) in _requestsStore.ReadMessages())
+        await foreach (var (address, callId, message, exception, closed) in _requestsStore.ReadMessages())
         {
             if (exception != null) throw exception;
-            yield return (address, (TReq)message!);
+            yield return (address, callId, (TReq)message!, closed);
         }
     }
 

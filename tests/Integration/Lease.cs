@@ -10,12 +10,13 @@ using dotnet_etcd;
 using DotnetNiceGrpcLogs;
 using Etcdserverpb;
 using Grpc.Core;
+using Integration.Utils;
 using NUnit.Framework;
 using Polly;
 
 namespace Integration;
 
-public class LeaseTests
+public class Lease
 {
     private const string Etcd1 = "127.0.0.1:23790";
     private const string Etcd2 = "127.0.0.1:23791";
@@ -46,10 +47,10 @@ public class LeaseTests
         {
             return client.LeaseGrant(request);
         });
-        await foreach ((string address, LeaseGrantRequest message) in delegateInterceptor.ReadAllRequests(CancellationToken.None))
+        await foreach ((string address, Guid callId, LeaseGrantRequest message, bool _) in delegateInterceptor.ReadAllRequests(CancellationToken.None))
         {
             Assert.AreEqual(message, request);
-            await delegateInterceptor.WriteResponseAsync(address,response);
+            await delegateInterceptor.WriteResponseAsync(address, callId,response);
             break;
         }
 
@@ -70,10 +71,10 @@ public class LeaseTests
         {
             return client.LeaseGrantAsync(request);
         });
-        await foreach ((string address, LeaseGrantRequest message) in delegateInterceptor.ReadAllRequests(CancellationToken.None))
+        await foreach ((string address, Guid callId, LeaseGrantRequest message, bool _) in delegateInterceptor.ReadAllRequests(CancellationToken.None))
         {
             Assert.AreEqual(message, request);
-            await delegateInterceptor.WriteResponseAsync(address,response);
+            await delegateInterceptor.WriteResponseAsync(address, callId,response);
             break;
         }
 
@@ -101,11 +102,14 @@ public class LeaseTests
 
          var iterator = delegateInterceptor.ReadAllRequests(CancellationToken.None).GetAsyncEnumerator();
          await iterator.MoveNextAsync();
-         await delegateInterceptor.WriteResponseAsync(iterator.Current.address,unavailableException);
+         var current = iterator.Current;
+         await delegateInterceptor.WriteResponseAsync(current.address, current.callId,unavailableException);
          await iterator.MoveNextAsync();
-         await delegateInterceptor.WriteResponseAsync(iterator.Current.address,unavailableException);
+         current = iterator.Current;
+         await delegateInterceptor.WriteResponseAsync(current.address, current.callId,unavailableException);
          await iterator.MoveNextAsync();
-         await delegateInterceptor.WriteResponseAsync(iterator.Current.address,response);
+         current = iterator.Current;
+         await delegateInterceptor.WriteResponseAsync(current.address, current.callId,response);
          var rsp = responseTask.Result;
          
          Assert.AreEqual(rsp, response);
@@ -114,7 +118,7 @@ public class LeaseTests
      [Test]
      public async Task AfterThreeExceptionsLeaseGrantedFail()
      {
-         var delegateInterceptor = new DelegateInterceptor<LeaseGrantRequest, LeaseGrantResponse>();
+         var delegateInterceptor = new DelegateInterceptor<LeaseGrantRequest, LeaseGrantResponse>(ignoreCallId: true);
          var client = new EtcdClient(
              connectionString: ConnectionString,
              interceptors:
@@ -124,9 +128,9 @@ public class LeaseTests
              new Status(
                  StatusCode.Unavailable,
                  ""));
-         await delegateInterceptor.WriteResponseAsync(Etcd1,unavailableException); 
-         await delegateInterceptor.WriteResponseAsync(Etcd2,unavailableException); 
-         await delegateInterceptor.WriteResponseAsync(Etcd3,unavailableException);
+         await delegateInterceptor.WriteResponseAsync(Etcd1, Guid.Empty, unavailableException); 
+         await delegateInterceptor.WriteResponseAsync(Etcd2, Guid.Empty,unavailableException); 
+         await delegateInterceptor.WriteResponseAsync(Etcd3, Guid.Empty,unavailableException);
          LeaseGrantRequest request = new() { ID = 777, TTL = 777 };
          
          var ex = Assert.Throws<RpcException>(
@@ -148,7 +152,7 @@ public class LeaseTests
      [Test]
      public async Task LeaseKeepAliveRequestSendedAfterDelay()
      {
-         var delegateInterceptor = new DelegateInterceptor<LeaseKeepAliveRequest, LeaseKeepAliveResponse>();
+         var delegateInterceptor = new DelegateInterceptor<LeaseKeepAliveRequest, LeaseKeepAliveResponse>(true);
          var client = new EtcdClient(
              connectionString: ConnectionString,
              interceptors:
@@ -163,7 +167,7 @@ public class LeaseTests
          var iterator = delegateInterceptor.ReadAllRequests(CancellationToken.None).GetAsyncEnumerator();
          await iterator.MoveNextAsync();
          Assert.AreEqual(iterator.Current.message.ID, 777);
-         await delegateInterceptor.WriteResponseAsync(iterator.Current.address,new LeaseKeepAliveResponse() { ID = 777, TTL = 1 });
+         await delegateInterceptor.WriteResponseAsync(iterator.Current.address, Guid.Empty,new LeaseKeepAliveResponse() { ID = 777, TTL = 1 });
          var nextKeepAliveTask = iterator.MoveNextAsync();
          await Task.Delay(100);
          Assert.True(nextKeepAliveTask.IsCompleted == false);

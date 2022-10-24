@@ -31,7 +31,7 @@ namespace dotnet_etcd
         #region Initializers
 
         public EtcdClient(string connectionString, int port = 2379,
-            HttpClientHandler handler = null, bool ssl = false,
+            HttpMessageHandler handler = null, bool ssl = false,
             bool useLegacyRpcExceptionForCancellation = false, params Interceptor[] interceptors)
         {
             if (string.IsNullOrWhiteSpace(connectionString))

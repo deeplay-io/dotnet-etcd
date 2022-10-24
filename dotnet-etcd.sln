@@ -9,6 +9,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{8645A28E
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Integration", "tests\Integration\Integration.csproj", "{617202A0-4D3A-4FA7-978E-B5A01A3152BD}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DevelopmentSandbox", "DevelopmentSandbox\DevelopmentSandbox.csproj", "{41EEF9B2-F4CE-4C28-A2C1-1525AD32729C}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -23,6 +25,10 @@ Global
 		{617202A0-4D3A-4FA7-978E-B5A01A3152BD}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{617202A0-4D3A-4FA7-978E-B5A01A3152BD}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{617202A0-4D3A-4FA7-978E-B5A01A3152BD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{41EEF9B2-F4CE-4C28-A2C1-1525AD32729C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{41EEF9B2-F4CE-4C28-A2C1-1525AD32729C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{41EEF9B2-F4CE-4C28-A2C1-1525AD32729C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{41EEF9B2-F4CE-4C28-A2C1-1525AD32729C}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

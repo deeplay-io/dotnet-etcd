@@ -2,7 +2,7 @@ version: '3.5'
 
 services:
   etcd0:
-    image: "gcr.io/etcd-development/etcd:v3.5.0-beta.4"
+    image: "gcr.io/etcd-development/etcd:v3.5.4"
     ports:
       - "23790:2379"
       - "2379:2379"
@@ -20,7 +20,7 @@ services:
       ]
 
   etcd1:
-    image: "gcr.io/etcd-development/etcd:v3.5.0-beta.4"
+    image: "gcr.io/etcd-development/etcd:v3.5.4"
     ports:
       - "23791:2379"
     command:
@@ -37,7 +37,7 @@ services:
       ]
 
   etcd2:
-    image: "gcr.io/etcd-development/etcd:v3.5.0-beta.4"
+    image: "gcr.io/etcd-development/etcd:v3.5.4"
     ports:
       - "23792:2379"
     command:

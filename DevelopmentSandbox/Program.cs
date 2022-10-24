@@ -31,8 +31,39 @@ internal class Program
             connectionString: connection_string,
             // handler: handler,
             useLegacyRpcExceptionForCancellation: false);
-        
 
+
+        var txn = new TxnRequest();
+        for (int i = 0; i < 120; i++)
+        {
+            txn.Success.Add(new RequestOp()
+            {
+                RequestPut = new PutRequest()
+                {
+                    Key = ByteString.CopyFromUtf8( "asdfadsfasdfdsf"+i),
+                    Value = ByteString.CopyFromUtf8("dfasdvasdfasdf")
+                    
+                }
+            });
+        }
+
+        while (true)
+        {
+            try
+            {
+                await client.TransactionAsync(
+                    txn,
+                    deadline: DateTime.UtcNow.AddMilliseconds(10));
+
+                Console.WriteLine("ok");
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine("fail");
+            }
+        }
+
+       
         Func<Task> doJob = async () =>
         {
             var leaseId = client.LeaseGrant(new LeaseGrantRequest() { TTL = 5 }).ID;
@@ -43,7 +74,6 @@ internal class Program
                 maxRetryBackoffMs: 400,
                 sleepAfterSuccessMs: 5000 / 3,
                 cts.Token).ConfigureAwait(false);
-            
             // await client.LeaseKeepAlive(
             //     leaseId,
             //     CancellationToken.None).ConfigureAwait(false);

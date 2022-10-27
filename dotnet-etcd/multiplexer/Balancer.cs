@@ -35,9 +35,6 @@ namespace dotnet_etcd.multiplexer
         /// </summary>
         private static readonly Random s_random = new Random();
 
-        private Func<CallInvoker> createNewCallInvoker;
-
-
         internal Balancer(List<Uri> nodes, HttpMessageHandler handler = null, bool ssl = false,
             bool useLegacyRpcExceptionForCancellation = false,SocketsHttpHandlerOptions handlerOptions = null,
             params Interceptor[] interceptors)

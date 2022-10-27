@@ -36,8 +36,9 @@ namespace dotnet_etcd.multiplexer
         private static readonly Random s_random = new Random();
 
 
-        internal Balancer(List<Uri> nodes, HttpClientHandler handler = null, bool ssl = false,
-            bool useLegacyRpcExceptionForCancellation = false, params Interceptor[] interceptors)
+        internal Balancer(List<Uri> nodes, HttpMessageHandler handler = null, bool ssl = false,
+            bool useLegacyRpcExceptionForCancellation = false,SocketsHttpHandlerOptions handlerOptions = null,
+            params Interceptor[] interceptors)
         {
             _numNodes = nodes.Count;
             _lastNodeIndex = s_random.Next(-1, _numNodes);
@@ -47,7 +48,22 @@ namespace dotnet_etcd.multiplexer
             foreach (Uri node in nodes)
             {
                 GrpcChannel channel;
-
+#if NET5_0 || NET6_0
+                if (handlerOptions != null)
+                {
+                    handler = new SocketsHttpHandler()
+                    {
+                        KeepAlivePingDelay = handlerOptions.KeepAlivePingDelay,
+                        KeepAlivePingTimeout = handlerOptions.KeepAlivePingTimeout,
+                        ConnectTimeout = handlerOptions.ConnectTimeout,
+                        EnableMultipleHttp2Connections = handlerOptions.EnableMultipleHttp2Connections,
+                        KeepAlivePingPolicy =
+                            handlerOptions.KeepAlivePingPolicyWithActiveRequests
+                                ? HttpKeepAlivePingPolicy.WithActiveRequests
+                                : HttpKeepAlivePingPolicy.Always,
+                    };
+                }
+#endif
                 if (ssl)
                 {
                     channel = GrpcChannel.ForAddress(node, new GrpcChannelOptions

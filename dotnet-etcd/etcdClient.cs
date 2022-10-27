@@ -15,6 +15,15 @@ using Grpc.Core.Interceptors;
 
 namespace dotnet_etcd
 {
+    public class SocketsHttpHandlerOptions
+    {
+        public TimeSpan KeepAlivePingDelay { get; set; }
+        public TimeSpan KeepAlivePingTimeout { get; set; }
+        public TimeSpan ConnectTimeout { get; set; }
+        public bool EnableMultipleHttp2Connections { get; set; }
+        public bool KeepAlivePingPolicyWithActiveRequests { get; set; }
+    }
+
     /// <summary>
     /// Etcd client is the entrypoint for this library.
     /// It contains all the functions required to perform operations on etcd.
@@ -31,8 +40,11 @@ namespace dotnet_etcd
         #region Initializers
 
         public EtcdClient(string connectionString, int port = 2379,
-            HttpClientHandler handler = null, bool ssl = false,
-            bool useLegacyRpcExceptionForCancellation = false, params Interceptor[] interceptors)
+            HttpMessageHandler handler = null, bool ssl = false,
+            bool useLegacyRpcExceptionForCancellation = false,
+            SocketsHttpHandlerOptions handlerOptions = null,
+            params Interceptor[] interceptors
+            )
         {
             if (string.IsNullOrWhiteSpace(connectionString))
             {
@@ -127,7 +139,7 @@ namespace dotnet_etcd
                 nodes.Add(new Uri(host));
             }
 
-            _balancer = new Balancer(nodes, handler, ssl, useLegacyRpcExceptionForCancellation, interceptors);
+            _balancer = new Balancer(nodes, handler, ssl, useLegacyRpcExceptionForCancellation, handlerOptions, interceptors);
         }
 
         #endregion

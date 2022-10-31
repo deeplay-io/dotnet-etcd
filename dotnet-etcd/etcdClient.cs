@@ -142,6 +142,17 @@ namespace dotnet_etcd
             _balancer = new Balancer(nodes, handler, ssl, useLegacyRpcExceptionForCancellation, handlerOptions, interceptors);
         }
 
+
+
+        public void RecreateConnections()
+        {
+            var connections = _balancer._healthyNode.ToArray();
+            for (var i = 0; i < connections.Length; i++)
+            {
+                connections[i].RecreateClients();
+            }
+        }
+
         #endregion
 
         #region IDisposable Support

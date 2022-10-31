@@ -18,7 +18,7 @@ namespace dotnet_etcd.multiplexer
 
     internal class Balancer
     {
-        private readonly HashSet<Connection> _healthyNode;
+        internal readonly HashSet<Connection> _healthyNode;
 
         /// <summary>
         /// No of etcd nodes
@@ -35,7 +35,6 @@ namespace dotnet_etcd.multiplexer
         /// </summary>
         private static readonly Random s_random = new Random();
 
-
         internal Balancer(List<Uri> nodes, HttpMessageHandler handler = null, bool ssl = false,
             bool useLegacyRpcExceptionForCancellation = false,SocketsHttpHandlerOptions handlerOptions = null,
             params Interceptor[] interceptors)
@@ -47,70 +46,7 @@ namespace dotnet_etcd.multiplexer
 
             foreach (Uri node in nodes)
             {
-                GrpcChannel channel;
-#if NET5_0 || NET6_0
-                if (handlerOptions != null)
-                {
-                    handler = new SocketsHttpHandler()
-                    {
-                        KeepAlivePingDelay = handlerOptions.KeepAlivePingDelay,
-                        KeepAlivePingTimeout = handlerOptions.KeepAlivePingTimeout,
-                        ConnectTimeout = handlerOptions.ConnectTimeout,
-                        EnableMultipleHttp2Connections = handlerOptions.EnableMultipleHttp2Connections,
-                        KeepAlivePingPolicy =
-                            handlerOptions.KeepAlivePingPolicyWithActiveRequests
-                                ? HttpKeepAlivePingPolicy.WithActiveRequests
-                                : HttpKeepAlivePingPolicy.Always,
-                    };
-                }
-#endif
-                if (ssl)
-                {
-                    channel = GrpcChannel.ForAddress(node, new GrpcChannelOptions
-                    {
-                        Credentials = new SslCredentials(),
-                        HttpHandler = handler,
-                        ThrowOperationCanceledOnCancellation = !useLegacyRpcExceptionForCancellation
-                    });
-                }
-                else
-                {
-#if NETCOREAPP3_1 || NETCOREAPP3_0
-                    AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
-#endif
-                    var options = new GrpcChannelOptions
-                    {
-                        Credentials = ChannelCredentials.Insecure,
-                        HttpHandler = handler,
-                        ThrowOperationCanceledOnCancellation = !useLegacyRpcExceptionForCancellation
-                    };
-
-                    channel = GrpcChannel.ForAddress(node, options);
-                }
-
-                CallInvoker callInvoker;
-
-                if (interceptors !=null && interceptors.Length > 0)
-                {
-                    callInvoker = channel.Intercept(interceptors);
-                }
-                else
-                {
-                    callInvoker = channel.CreateCallInvoker();
-                }
-
-
-                Connection connection = new Connection
-                {
-                    _kvClient = new KV.KVClient(callInvoker),
-                    _watchClient = new Watch.WatchClient(callInvoker),
-                    _leaseClient = new Lease.LeaseClient(callInvoker),
-                    _lockClient = new V3Lockpb.Lock.LockClient(callInvoker),
-                    _clusterClient = new Cluster.ClusterClient(callInvoker),
-                    _maintenanceClient = new Maintenance.MaintenanceClient(callInvoker),
-                    _authClient = new Auth.AuthClient(callInvoker)
-                };
-
+                Connection connection = new Connection(node, handler, ssl, useLegacyRpcExceptionForCancellation,handlerOptions , interceptors);
                 _healthyNode.Add(connection);
             }
         }

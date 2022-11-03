@@ -57,7 +57,8 @@ namespace dotnet_etcd.multiplexer
                     {
                         Credentials = new SslCredentials(),
                         HttpHandler = handler,
-                        ThrowOperationCanceledOnCancellation = !useLegacyRpcExceptionForCancellation
+                        ThrowOperationCanceledOnCancellation = !useLegacyRpcExceptionForCancellation,
+                        MaxReceiveMessageSize = null,
                     });
                 }
                 else
@@ -69,7 +70,8 @@ namespace dotnet_etcd.multiplexer
                     {
                         Credentials = ChannelCredentials.Insecure,
                         HttpHandler = handler,
-                        ThrowOperationCanceledOnCancellation = !useLegacyRpcExceptionForCancellation
+                        ThrowOperationCanceledOnCancellation = !useLegacyRpcExceptionForCancellation,
+                        MaxReceiveMessageSize = null,
                     };
 
                     channel = GrpcChannel.ForAddress(node, options);

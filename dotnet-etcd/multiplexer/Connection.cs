@@ -7,6 +7,7 @@ using Etcdserverpb;
 using Grpc.Core;
 using Grpc.Core.Interceptors;
 using Grpc.Net.Client;
+using Microsoft.Extensions.Logging;
 using V3Lockpb;
 
 namespace dotnet_etcd.multiplexer
@@ -30,7 +31,7 @@ namespace dotnet_etcd.multiplexer
         private Func<CallInvoker> createNewCallInvoker;
 
         public Connection(Uri node, HttpMessageHandler handler = null, bool ssl = false,
-            bool useLegacyRpcExceptionForCancellation = false, SocketsHttpHandlerOptions handlerOptions = null, params Interceptor[] interceptors)
+            bool useLegacyRpcExceptionForCancellation = false, SocketsHttpHandlerOptions handlerOptions = null, ILoggerFactory grpcLoggerFactory = null, params Interceptor[] interceptors)
         {
             createNewCallInvoker = () =>
             {
@@ -59,6 +60,7 @@ namespace dotnet_etcd.multiplexer
                         HttpHandler = handler,
                         ThrowOperationCanceledOnCancellation = !useLegacyRpcExceptionForCancellation,
                         MaxReceiveMessageSize = null,
+                        LoggerFactory = grpcLoggerFactory
                     });
                 }
                 else
@@ -72,6 +74,7 @@ namespace dotnet_etcd.multiplexer
                         HttpHandler = handler,
                         ThrowOperationCanceledOnCancellation = !useLegacyRpcExceptionForCancellation,
                         MaxReceiveMessageSize = null,
+                        LoggerFactory = grpcLoggerFactory
                     };
 
                     channel = GrpcChannel.ForAddress(node, options);

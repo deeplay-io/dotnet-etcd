@@ -12,6 +12,7 @@ using DnsClient.Protocol;
 using dotnet_etcd.interfaces;
 using dotnet_etcd.multiplexer;
 using Grpc.Core.Interceptors;
+using Microsoft.Extensions.Logging;
 
 namespace dotnet_etcd
 {
@@ -43,6 +44,7 @@ namespace dotnet_etcd
             HttpMessageHandler handler = null, bool ssl = false,
             bool useLegacyRpcExceptionForCancellation = false,
             SocketsHttpHandlerOptions handlerOptions = null,
+            ILoggerFactory grpcLoggerFactory = null,
             params Interceptor[] interceptors
             )
         {
@@ -139,7 +141,7 @@ namespace dotnet_etcd
                 nodes.Add(new Uri(host));
             }
 
-            _balancer = new Balancer(nodes, handler, ssl, useLegacyRpcExceptionForCancellation, handlerOptions, interceptors);
+            _balancer = new Balancer(nodes, handler, ssl, useLegacyRpcExceptionForCancellation, handlerOptions, grpcLoggerFactory, interceptors);
         }
 
 

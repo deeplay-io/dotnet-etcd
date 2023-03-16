@@ -12,6 +12,7 @@ using Etcdserverpb;
 using Grpc.Core;
 using Grpc.Core.Interceptors;
 using Grpc.Net.Client;
+using Microsoft.Extensions.Logging;
 
 namespace dotnet_etcd.multiplexer
 {
@@ -37,6 +38,7 @@ namespace dotnet_etcd.multiplexer
 
         internal Balancer(List<Uri> nodes, HttpMessageHandler handler = null, bool ssl = false,
             bool useLegacyRpcExceptionForCancellation = false,SocketsHttpHandlerOptions handlerOptions = null,
+            ILoggerFactory grpcLoggerFactory = null,
             params Interceptor[] interceptors)
         {
             _numNodes = nodes.Count;
@@ -46,7 +48,7 @@ namespace dotnet_etcd.multiplexer
 
             foreach (Uri node in nodes)
             {
-                Connection connection = new Connection(node, handler, ssl, useLegacyRpcExceptionForCancellation,handlerOptions , interceptors);
+                Connection connection = new Connection(node, handler, ssl, useLegacyRpcExceptionForCancellation,handlerOptions,grpcLoggerFactory , interceptors);
                 _healthyNode.Add(connection);
             }
         }

@@ -19,7 +19,6 @@ public static class Framework
 
     public static EtcdClient Client { get; } = new EtcdClient(
         "http://localhost:23790,http://localhost:23791,http://localhost:23792", //todo: вытащить в конфигурацию
-        useLegacyRpcExceptionForCancellation: false,
         interceptors: new GrpcLogsInterceptor(
             Logger,
             new LogsInterceptorOptions

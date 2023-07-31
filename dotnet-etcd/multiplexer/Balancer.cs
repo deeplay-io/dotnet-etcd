@@ -36,9 +36,7 @@ namespace dotnet_etcd.multiplexer
         /// </summary>
         private static readonly Random s_random = new Random();
 
-        internal Balancer(List<Uri> nodes, HttpMessageHandler handler = null, bool ssl = false,
-            bool useLegacyRpcExceptionForCancellation = false,SocketsHttpHandlerOptions handlerOptions = null,
-            ILoggerFactory grpcLoggerFactory = null,
+        internal Balancer(List<Uri> nodes, GrpcChannelOptions? grpcChannelOptions,
             params Interceptor[] interceptors)
         {
             _numNodes = nodes.Count;
@@ -48,7 +46,7 @@ namespace dotnet_etcd.multiplexer
 
             foreach (Uri node in nodes)
             {
-                Connection connection = new Connection(node, handler, ssl, useLegacyRpcExceptionForCancellation,handlerOptions,grpcLoggerFactory , interceptors);
+                Connection connection = new Connection(node, grpcChannelOptions, interceptors);
                 _healthyNode.Add(connection);
             }
         }

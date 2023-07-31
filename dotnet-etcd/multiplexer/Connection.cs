@@ -2,11 +2,13 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
+using System.Collections.Generic;
 using System.Net.Http;
 using Etcdserverpb;
 using Grpc.Core;
 using Grpc.Core.Interceptors;
 using Grpc.Net.Client;
+using Grpc.Net.Client.Configuration;
 using Microsoft.Extensions.Logging;
 using V3Lockpb;
 
@@ -30,55 +32,37 @@ namespace dotnet_etcd.multiplexer
 
         private Func<CallInvoker> createNewCallInvoker;
 
-        public Connection(Uri node, HttpMessageHandler handler = null, bool ssl = false,
-            bool useLegacyRpcExceptionForCancellation = false, SocketsHttpHandlerOptions handlerOptions = null, ILoggerFactory grpcLoggerFactory = null, params Interceptor[] interceptors)
+        public Connection(Uri node, GrpcChannelOptions? grpcChannelOptions, params Interceptor[] interceptors)
         {
             createNewCallInvoker = () =>
             {
                 GrpcChannel channel;
-#if NET5_0 || NET6_0
-                if (handlerOptions != null)
-                {
-                    handler = new SocketsHttpHandler()
-                    {
-                        KeepAlivePingDelay = handlerOptions.KeepAlivePingDelay,
-                        KeepAlivePingTimeout = handlerOptions.KeepAlivePingTimeout,
-                        ConnectTimeout = handlerOptions.ConnectTimeout,
-                        EnableMultipleHttp2Connections = handlerOptions.EnableMultipleHttp2Connections,
-                        KeepAlivePingPolicy =
-                            handlerOptions.KeepAlivePingPolicyWithActiveRequests
-                                ? HttpKeepAlivePingPolicy.WithActiveRequests
-                                : HttpKeepAlivePingPolicy.Always,
-                    };
-                }
-#endif
-                if (ssl)
-                {
-                    channel = GrpcChannel.ForAddress(node, new GrpcChannelOptions
-                    {
-                        Credentials = new SslCredentials(),
-                        HttpHandler = handler,
-                        ThrowOperationCanceledOnCancellation = !useLegacyRpcExceptionForCancellation,
-                        MaxReceiveMessageSize = null,
-                        LoggerFactory = grpcLoggerFactory
-                    });
-                }
-                else
-                {
+// #if NET5_0 || NET6_0
+//                 if (handlerOptions != null)
+//                 {
+//                     handler = new SocketsHttpHandler()
+//                     {
+//                         KeepAlivePingDelay = handlerOptions.KeepAlivePingDelay,
+//                         KeepAlivePingTimeout = handlerOptions.KeepAlivePingTimeout,
+//                         ConnectTimeout = handlerOptions.ConnectTimeout,
+//                         EnableMultipleHttp2Connections = handlerOptions.EnableMultipleHttp2Connections,
+//                         KeepAlivePingPolicy =
+//                             handlerOptions.KeepAlivePingPolicyWithActiveRequests
+//                                 ? HttpKeepAlivePingPolicy.WithActiveRequests
+//                                 : HttpKeepAlivePingPolicy.Always,
+//                     };
+//                 }
+// #endif
 #if NETCOREAPP3_1 || NETCOREAPP3_0
                     AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
 #endif
-                    var options = new GrpcChannelOptions
-                    {
-                        Credentials = ChannelCredentials.Insecure,
-                        HttpHandler = handler,
-                        ThrowOperationCanceledOnCancellation = !useLegacyRpcExceptionForCancellation,
-                        MaxReceiveMessageSize = null,
-                        LoggerFactory = grpcLoggerFactory
-                    };
 
-                    channel = GrpcChannel.ForAddress(node, options);
-                }
+                channel = grpcChannelOptions == null
+                    ? GrpcChannel.ForAddress(node)
+                    : GrpcChannel.ForAddress(
+                        node,
+                        grpcChannelOptions);
+
 
                 CallInvoker callInvoker;
 

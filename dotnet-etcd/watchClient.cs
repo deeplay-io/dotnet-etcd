@@ -104,7 +104,7 @@ namespace dotnet_etcd
                     }
                 }, cancellationToken);
 
-                await watcher.RequestStream.WriteAsync(request, cancellationToken).ConfigureAwait(false);
+                await watcher.RequestStream.WriteAsync(request).ConfigureAwait(false);
                 await watcherTask.ConfigureAwait(false);
                 await watcher.RequestStream.CompleteAsync().ConfigureAwait(false);
             }

@@ -81,7 +81,38 @@ namespace dotnet_etcd
 
         /// <summary>
         /// Watches a key according to the specified watch request and
-        /// passes the watch response to the methods provided. 
+        /// passes the watch response to the method provided.
+        /// </summary>
+        /// <param name="request">Watch Request containing key to be watched</param>
+        /// <param name="method">Method to which watch response should be passed on</param>
+        /// <param name="headers">The initial metadata to send with the call. This parameter is optional.</param>
+        /// <param name="deadline">An optional deadline for the call. The call will be cancelled if deadline is hit.</param>
+        /// <param name="cancellationToken">An optional token for canceling the call.</param>
+        public async Task WatchV2(WatchRequest request, Action<WatchResponse> method, Grpc.Core.Metadata headers = null,
+            DateTime? deadline = null,
+            CancellationToken cancellationToken = default) => await CallEtcdAsync(async (connection) =>
+        {
+            using (AsyncDuplexStreamingCall<WatchRequest, WatchResponse> watcher =
+                   connection._watchClient.Watch(headers, deadline, cancellationToken))
+            {
+                Task watcherTask = Task.Run(async () =>
+                {
+                    while (await watcher.ResponseStream.MoveNext(cancellationToken).ConfigureAwait(false))
+                    {
+                        WatchResponse update = watcher.ResponseStream.Current;
+                        method(update);
+                    }
+                }, cancellationToken);
+
+                await watcher.RequestStream.WriteAsync(request).ConfigureAwait(false);
+                await watcherTask.ConfigureAwait(false);
+                await watcher.RequestStream.CompleteAsync().ConfigureAwait(false);
+            }
+        }).ConfigureAwait(false);
+
+        /// <summary>
+        /// Watches a key according to the specified watch request and
+        /// passes the watch response to the methods provided.
         /// </summary>
         /// <param name="request">Watch Request containing key to be watched</param>
         /// <param name="methods">Methods to which watch response should be passed on</param>
@@ -115,7 +146,7 @@ namespace dotnet_etcd
 
         /// <summary>
         /// Watches a key according to the specified watch request and
-        /// passes the minimal watch event data to the method provided. 
+        /// passes the minimal watch event data to the method provided.
         /// </summary>
         /// <param name="request">Watch Request containing key to be watched</param>
         /// <param name="method">Method to which minimal watch events data should be passed on</param>
@@ -155,7 +186,7 @@ namespace dotnet_etcd
 
         /// <summary>
         /// Watches a key according to the specified watch request and
-        /// passes the minimal watch event data to the methods provided. 
+        /// passes the minimal watch event data to the methods provided.
         /// </summary>
         /// <param name="request">Watch Request containing key to be watched</param>
         /// <param name="methods">Methods to which minimal watch events data should be passed on</param>
@@ -233,7 +264,7 @@ namespace dotnet_etcd
 
         /// <summary>
         /// Watches a key according to the specified watch requests and
-        /// passes the watch response to the methods provided. 
+        /// passes the watch response to the methods provided.
         /// </summary>
         /// <param name="requests">Watch Requests containing keys to be watched</param>
         /// <param name="methods">Methods to which watch response should be passed on</param>
@@ -271,7 +302,7 @@ namespace dotnet_etcd
 
         /// <summary>
         /// Watches a key according to the specified watch request and
-        /// passes the minimal watch event data to the method provided. 
+        /// passes the minimal watch event data to the method provided.
         /// </summary>
         /// <param name="requests">Watch Requests containing keys to be watched</param>
         /// <param name="method">Method to which minimal watch events data should be passed on</param>
@@ -315,7 +346,7 @@ namespace dotnet_etcd
 
         /// <summary>
         /// Watches a key according to the specified watch requests and
-        /// passes the minimal watch event data to the methods provided. 
+        /// passes the minimal watch event data to the methods provided.
         /// </summary>
         /// <param name="requests">Watch Request containing keys to be watched</param>
         /// <param name="methods">Methods to which minimal watch events data should be passed on</param>
@@ -605,7 +636,7 @@ namespace dotnet_etcd
 
         /// <summary>
         /// Watches a key range according to the specified watch request and
-        /// passes the watch response to the methods provided. 
+        /// passes the watch response to the methods provided.
         /// </summary>
         /// <param name="request">Watch Request containing key to be watched</param>
         /// <param name="methods">Methods to which watch response should be passed on</param>
@@ -639,7 +670,7 @@ namespace dotnet_etcd
 
         /// <summary>
         /// Watches a key range according to the specified watch request and
-        /// passes the minimal watch event data to the method provided. 
+        /// passes the minimal watch event data to the method provided.
         /// </summary>
         /// <param name="request">Watch Request containing key to be watched</param>
         /// <param name="method">Method to which minimal watch events data should be passed on</param>
@@ -679,7 +710,7 @@ namespace dotnet_etcd
 
         /// <summary>
         /// Watches a key range according to the specified watch request and
-        /// passes the minimal watch event data to the methods provided. 
+        /// passes the minimal watch event data to the methods provided.
         /// </summary>
         /// <param name="request">Watch Request containing key to be watched</param>
         /// <param name="methods">Methods to which minimal watch events data should be passed on</param>
@@ -757,7 +788,7 @@ namespace dotnet_etcd
 
         /// <summary>
         /// Watches a key range according to the specified watch requests and
-        /// passes the watch response to the methods provided. 
+        /// passes the watch response to the methods provided.
         /// </summary>
         /// <param name="requests">Watch Requests containing keys to be watched</param>
         /// <param name="methods">Methods to which watch response should be passed on</param>
@@ -795,7 +826,7 @@ namespace dotnet_etcd
 
         /// <summary>
         /// Watches a key range according to the specified watch request and
-        /// passes the minimal watch event data to the method provided. 
+        /// passes the minimal watch event data to the method provided.
         /// </summary>
         /// <param name="requests">Watch Requests containing keys to be watched</param>
         /// <param name="method">Method to which minimal watch events data should be passed on</param>
@@ -839,7 +870,7 @@ namespace dotnet_etcd
 
         /// <summary>
         /// Watches a key range according to the specified watch requests and
-        /// passes the minimal watch event data to the methods provided. 
+        /// passes the minimal watch event data to the methods provided.
         /// </summary>
         /// <param name="requests">Watch Request containing keys to be watched</param>
         /// <param name="methods">Methods to which minimal watch events data should be passed on</param>

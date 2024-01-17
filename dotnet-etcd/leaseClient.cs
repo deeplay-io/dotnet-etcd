@@ -144,6 +144,32 @@ namespace dotnet_etcd
         /// to the server and streaming keep alive responses from the server to the client.
         /// </summary>
         /// <param name="request">The request to send to the server.</param>
+        /// <param name="method"></param>
+        /// <param name="cancellationToken"></param>
+        /// <param name="headers">The initial metadata to send with the call. This parameter is optional.</param>
+        public async Task LeaseKeepAliveV2(LeaseKeepAliveRequest request, Action<LeaseKeepAliveResponse> method,
+            CancellationToken cancellationToken, Metadata headers = null) => await CallEtcdAsync(async connection =>
+        {
+            using (AsyncDuplexStreamingCall<LeaseKeepAliveRequest, LeaseKeepAliveResponse> leaser =
+                   connection._leaseClient
+                       .LeaseKeepAlive(headers, cancellationToken: cancellationToken))
+            {
+                await leaser.RequestStream.WriteAsync(request).ConfigureAwait(false);
+                await leaser.ResponseStream
+                    .MoveNext(
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                LeaseKeepAliveResponse update = leaser.ResponseStream.Current;
+                method(update);
+                await leaser.RequestStream.CompleteAsync().ConfigureAwait(false);
+            }
+        }).ConfigureAwait(false);
+
+        /// <summary>
+        /// LeaseKeepAlive keeps the lease alive by streaming keep alive requests from the client
+        /// to the server and streaming keep alive responses from the server to the client.
+        /// </summary>
+        /// <param name="request">The request to send to the server.</param>
         /// <param name="methods"></param>
         /// <param name="cancellationToken"></param>
         /// <param name="headers">The initial metadata to send with the call. This parameter is optional.</param>
